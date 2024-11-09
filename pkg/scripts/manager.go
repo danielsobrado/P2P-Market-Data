@@ -18,14 +18,6 @@ import (
 	"p2p_market_data/pkg/config"
 )
 
-// Manager defines the structure and methods for managing scripts.
-type Manager struct {
-    // Define necessary fields for the Manager struct
-    // For example:
-    // Name string
-    // Scripts []Script
-}
-
 // ScriptMetadata contains script information
 type ScriptMetadata struct {
 	ID           string
@@ -42,11 +34,11 @@ type ScriptMetadata struct {
 
 // ScriptManager handles script storage and management
 type ScriptManager struct {
-	config    *config.ScriptConfig
-	executor  *ScriptExecutor
-	logger    *zap.Logger
-	scripts   map[string]*ScriptMetadata
-	mu        sync.RWMutex
+	config   *config.ScriptConfig
+	executor *ScriptExecutor
+	logger   *zap.Logger
+	scripts  map[string]*ScriptMetadata
+	mu       sync.RWMutex
 }
 
 // NewScriptManager creates a new script manager
@@ -74,6 +66,25 @@ func NewScriptManager(config *config.ScriptConfig, logger *zap.Logger) (*ScriptM
 	}
 
 	return manager, nil
+}
+
+// Stop gracefully shuts down the ScriptManager, performing any necessary cleanup.
+func (m *ScriptManager) Stop() error {
+	// Add any cleanup logic here if needed.
+	// For example, stopping running scripts, closing channels, etc.
+
+	m.logger.Info("Stopping Script Manager")
+
+	// If there are background processes or resources to clean up, handle them here.
+	// Example:
+	// if m.executor != nil {
+	//     if err := m.executor.Shutdown(); err != nil {
+	//         m.logger.Error("Error shutting down executor", zap.Error(err))
+	//         return err
+	//     }
+	// }
+
+	return nil
 }
 
 // AddScript adds a new script
@@ -279,7 +290,7 @@ func (m *ScriptManager) ValidateDependencies(scriptID string) error {
 		// Create temporary script to test import
 		testScript := fmt.Sprintf("import %s", dep)
 		tmpFile := filepath.Join(m.config.ScriptDir, "_test_import.py")
-		
+
 		if err := os.WriteFile(tmpFile, []byte(testScript), 0644); err != nil {
 			return fmt.Errorf("creating test script: %w", err)
 		}

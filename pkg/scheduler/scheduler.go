@@ -44,7 +44,7 @@ type Task struct {
 // Scheduler manages task scheduling and execution
 type Scheduler struct {
 	cron       *cron.Cron
-	scriptMgr  *scripts.Manager
+	scriptMgr  *scripts.ScriptManager
 	tasks      map[string]*Task
 	config     *config.SchedConfig
 	logger     *zap.Logger
@@ -67,7 +67,7 @@ type SchedulerMetrics struct {
 }
 
 // NewScheduler creates a new scheduler instance
-func NewScheduler(scriptMgr *scripts.Manager, config *config.SchedConfig, logger *zap.Logger) *Scheduler {
+func NewScheduler(scriptMgr *scripts.ScriptManager, config *config.SchedConfig, logger *zap.Logger) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Scheduler{

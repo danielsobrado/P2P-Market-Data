@@ -40,7 +40,14 @@ func (s *Status) UpdateStatus(isReady bool, isValidating bool, lastError error) 
 func (s *Status) GetStatus() Status {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return *s
+	return Status{
+		IsReady:      s.IsReady,
+		IsValidating: s.IsValidating,
+		LastError:    s.LastError,
+		StartTime:    s.StartTime,
+		UpdatedAt:    s.UpdatedAt,
+		Version:      s.Version,
+	}
 }
 
 // IsOnline checks if the host is ready and not in error state

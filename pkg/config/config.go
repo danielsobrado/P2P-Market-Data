@@ -15,10 +15,19 @@ import (
 type Config struct {
 	Environment string         `mapstructure:"environment"`
 	LogLevel    string         `mapstructure:"log_level"`
+	Database    DatabaseConfig `mapstructure:"database"`
 	P2P         P2PConfig      `mapstructure:"p2p"`
 	Scripts     ScriptConfig   `mapstructure:"scripts"`
 	Scheduler   SchedConfig    `mapstructure:"scheduler"`
 	Security    SecurityConfig `mapstructure:"security"`
+}
+
+// DatabaseConfig holds database connection settings
+type DatabaseConfig struct {
+	URL      string        `mapstructure:"url"`
+	MaxConns int           `mapstructure:"max_conns"`
+	Timeout  time.Duration `mapstructure:"timeout"`
+	SSLMode  string        `mapstructure:"ssl_mode"`
 }
 
 // P2PConfig holds P2P network related configuration
@@ -131,10 +140,20 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("security.min_reputation_score", 0.5)
 	v.SetDefault("security.max_penalty", 1.0)
 	v.SetDefault("security.token_expiry", "24h")
+
+	// Database defaults
+	v.SetDefault("database.max_conns", 10)
+	v.SetDefault("database.timeout", "30s")
+	v.SetDefault("database.ssl_mode", "disable")
 }
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
+	// Validate Database configuration
+	if err := c.validateDatabase(); err != nil {
+		return fmt.Errorf("database config: %w", err)
+	}
+
 	// Validate P2P configuration
 	if err := c.validateP2P(); err != nil {
 		return fmt.Errorf("p2p config: %w", err)
@@ -155,6 +174,19 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("security config: %w", err)
 	}
 
+	return nil
+}
+
+func (c *Config) validateDatabase() error {
+	if c.Database.URL == "" {
+		return fmt.Errorf("database URL cannot be empty")
+	}
+	if c.Database.MaxConns <= 0 {
+		return fmt.Errorf("max_conns must be positive")
+	}
+	if c.Database.Timeout <= 0 {
+		return fmt.Errorf("timeout must be positive")
+	}
 	return nil
 }
 

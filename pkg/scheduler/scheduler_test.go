@@ -17,7 +17,7 @@ import (
 
 func setupTestScheduler(t *testing.T) *Scheduler {
 	logger := zaptest.NewLogger(t)
-	scriptMgr := &scripts.Manager{} // Mock script manager
+	scriptMgr := &scripts.ScriptManager{} // Mock script manager
 	cfg := &config.SchedConfig{
 		MaxConcurrent: 5,
 		RetryDelay:    time.Second,
