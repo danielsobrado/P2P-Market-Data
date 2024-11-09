@@ -122,8 +122,3 @@ func (nm *NetworkManager) runMetricsCollector() {
 		}
 	}
 }
-
-// GetMetrics returns the current network metrics
-func (nm *NetworkManager) GetMetrics() *MetricsData {
-	return nm.metrics.GetMetrics()
-}

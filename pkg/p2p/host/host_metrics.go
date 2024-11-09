@@ -18,6 +18,18 @@ type Metrics struct {
 	mu                sync.RWMutex
 }
 
+// MetricsData represents the snapshot of metrics data
+type MetricsData struct {
+	ConnectedPeers    int
+	TotalPeers        int
+	MessagesProcessed int64
+	ValidationLatency time.Duration
+	NetworkLatency    time.Duration
+	FailedValidations int64
+	AvgLatency        time.Duration
+	LastUpdated       time.Time
+}
+
 // NewMetrics creates a new Metrics instance
 func NewMetrics() *Metrics {
 	return &Metrics{
@@ -82,7 +94,7 @@ func (m *Metrics) GetMetrics() Metrics {
 		ValidationLatency: m.ValidationLatency,
 		NetworkLatency:    m.NetworkLatency,
 		FailedValidations: m.FailedValidations,
-		AvgLatency:       m.AvgLatency,
-		LastUpdated:      m.LastUpdated,
+		AvgLatency:        m.AvgLatency,
+		LastUpdated:       m.LastUpdated,
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/host"
+	libp2pHost "github.com/libp2p/go-libp2p-core/host"
 	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
 	libp2pDiscovery "github.com/libp2p/go-libp2p-discovery"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -21,7 +21,7 @@ type Peer struct {
 
 // PeerManager handles peer discovery and management
 type PeerManager struct {
-	host      *host.Host
+	host      libp2pHost.Host
 	logger    *zap.Logger
 	discovery *libp2pDiscovery.RoutingDiscovery
 	mu        sync.Mutex
@@ -29,8 +29,8 @@ type PeerManager struct {
 }
 
 // NewPeerManager creates a new PeerManager
-func NewPeerManager(host *host.Host, logger *zap.Logger) *PeerManager {
-	kadDHT, _ := dht.New(context.Background(), *host)
+func NewPeerManager(host libp2pHost.Host, logger *zap.Logger) *PeerManager {
+	kadDHT, _ := dht.New(context.Background(), host)
 	routingDiscovery := libp2pDiscovery.NewRoutingDiscovery(kadDHT)
 	return &PeerManager{
 		host:      host,
@@ -55,7 +55,7 @@ func (pm *PeerManager) Discover() ([]libp2pPeer.AddrInfo, error) {
 
 	var peers []libp2pPeer.AddrInfo
 	for peerInfo := range peerChan {
-		if peerInfo.ID == (*pm.host).ID() {
+		if peerInfo.ID == pm.host.ID() {
 			continue // Skip self
 		}
 		peers = append(peers, peerInfo)
@@ -70,17 +70,17 @@ func (pm *PeerManager) AddPeer(peerInfo libp2pPeer.AddrInfo) {
 		ID:        peerInfo.ID,
 		Addresses: peerInfo.Addrs,
 	}
-	(*pm.host).Peerstore().AddAddrs(peer.ID, peer.Addresses, time.Hour)
+	pm.host.Peerstore().AddAddrs(peer.ID, peer.Addresses, time.Hour)
 }
 
 // RemovePeer removes a peer from the peer store
 func (pm *PeerManager) RemovePeer(peerID libp2pPeer.ID) {
-	(*pm.host).Peerstore().RemovePeer(peerID)
+	pm.host.Peerstore().RemovePeer(peerID)
 }
 
 // GetPeer retrieves a peer from the peer store
 func (pm *PeerManager) GetPeer(peerID libp2pPeer.ID) (*Peer, bool) {
-	addrs := (*pm.host).Peerstore().Addrs(peerID)
+	addrs := pm.host.Peerstore().Addrs(peerID)
 	if len(addrs) == 0 {
 		return nil, false
 	}

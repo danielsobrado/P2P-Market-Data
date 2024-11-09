@@ -16,14 +16,6 @@ type AuthorityMetrics struct {
 	mu                   sync.RWMutex
 }
 
-// MetricsData represents network metrics data
-type MetricsData struct {
-	ConnectedPeers int
-	BandwidthIn    int64
-	BandwidthOut   int64
-	LastUpdateTime time.Time
-}
-
 // MetricsData represents network metrics
 type MetricsData struct {
 	ConnectedPeers int
@@ -87,7 +79,22 @@ func (an *AuthorityNode) GetStats() AuthorityStats {
 	}
 }
 
-// GetMetrics returns the current metrics data
+// In metrics.go
+type Metrics struct {
+	mu   sync.RWMutex
+	data MetricsData
+}
+
+// GetMetrics returns a copy of the metrics data without the mutex
 func (m *Metrics) GetMetrics() *MetricsData {
-	return m.data
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Create a new MetricsData instance with copied values
+	return &MetricsData{
+		ConnectedPeers: m.data.ConnectedPeers,
+		BytesSent:      m.data.BytesSent,
+		BytesReceived:  m.data.BytesReceived,
+		ActiveStreams:  m.data.ActiveStreams,
+	}
 }
