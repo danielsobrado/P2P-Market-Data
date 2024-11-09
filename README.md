@@ -6,6 +6,8 @@ A decentralized platform for sharing and validating financial market data across
 
 P2P Market Data enables secure, distributed sharing of financial market data between trusted peers. It uses blockchain-inspired consensus mechanisms to validate data integrity and source reputation.
 
+![P2P Market Data](https://github.com/danielsobrado/p2p_market_data/blob/main/images/P2P_MD_Screenshot.png)
+
 ## Features
 
 - Decentralized P2P network for data sharing
