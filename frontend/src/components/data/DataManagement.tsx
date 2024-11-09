@@ -49,6 +49,18 @@ import type {
   DataTransfer,
   DataRequest,
 } from '@/types/marketData'
+import React from 'react'
+
+interface MarketData {
+  id: string
+  symbol: string
+  price: number
+  volume: number
+  timestamp: string
+  source: string
+  dataType: string
+  validationScore: number
+}
 
 interface DataManagementProps {
   sources: DataSource[];
@@ -59,6 +71,7 @@ interface DataManagementProps {
   onClearSearch: () => void;
   isLoading: boolean;
   setPollingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  onError?: (error: Error) => void
 }
 
 const DataManagementComponent: React.FC<DataManagementProps> = ({
@@ -68,12 +81,17 @@ const DataManagementComponent: React.FC<DataManagementProps> = ({
   onSearch,
   onRequestData,
   setPollingEnabled,
+  onError,
 }) => {
   const [dataType, setDataType] = useState<MarketDataType>('EOD')
   const [symbol, setSymbol] = useState<string>('')
   const [startDate, setStartDate] = useState<Date>()
   const [endDate, setEndDate] = useState<Date>()
   const [granularity, setGranularity] = useState<TimeGranularity>('DAILY')
+  const [data, setData] = useState<MarketData[]>([])
+  const [loading, setLoading] = useState(false)
+  const [selectedDate, setSelectedDate] = useState<Date>()
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     setPollingEnabled(true)
@@ -108,12 +126,31 @@ const DataManagementComponent: React.FC<DataManagementProps> = ({
     await onRequestData(source.peerId, request)
   }
 
+  const fetchData = async () => {
+    try {
+      setLoading(true)
+      const response = await fetch('/api/market-data')
+      const result = await response.json()
+      setData(result)
+    } catch (error) {
+      onError?.(error as Error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchData()
+  }, [])
+
   return (
     <Tabs defaultValue="search" className="space-y-4">
       <TabsList>
         <TabsTrigger value="search">Search Data</TabsTrigger>
         <TabsTrigger value="sources">Data Sources</TabsTrigger>
         <TabsTrigger value="transfers">Active Transfers</TabsTrigger>
+        <TabsTrigger value="view">View Data</TabsTrigger>
+        <TabsTrigger value="analytics">Analytics</TabsTrigger>
       </TabsList>
 
       <TabsContent value="search" className="space-y-4">
@@ -345,6 +382,59 @@ const DataManagementComponent: React.FC<DataManagementProps> = ({
                   </Card>
                 ))}
               </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="view">
+        <Card>
+          <CardHeader>
+            <CardTitle>Market Data Management</CardTitle>
+            <CardDescription>View and manage market data entries</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-4 mb-4">
+              <Input
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="max-w-sm"
+              />
+              <Button onClick={fetchData}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
+            <ScrollArea className="h-[400px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Symbol</TableHead>
+                    <TableHead>Price</TableHead>
+                    <TableHead>Volume</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Validation</TableHead>
+                    <TableHead>Timestamp</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>{item.symbol}</TableCell>
+                      <TableCell>{item.price}</TableCell>
+                      <TableCell>{item.volume}</TableCell>
+                      <TableCell>{item.source}</TableCell>
+                      <TableCell>
+                        <Progress value={item.validationScore * 100} />
+                      </TableCell>
+                      <TableCell>
+                        {format(new Date(item.timestamp), 'PPpp')}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </ScrollArea>
           </CardContent>
         </Card>
