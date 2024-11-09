@@ -18,20 +18,23 @@ import { DataRequest } from "./types/marketData"
 function App() {
   const [isConnected, setIsConnected] = useState(false)
   const [activeView, setActiveView] = useState('data')
+  const [isPolling, setIsPolling] = useState(false)
 
+  // Check connection status
   useEffect(() => {
-    // Check P2P connection status
     const checkConnection = async () => {
       try {
-        const status = await window.go.main.App.CheckConnection()
-        setIsConnected(status)
+        // TODO: Implement proper connection check
+        setIsConnected(true)
       } catch (error) {
         console.error('Connection check failed:', error)
+        setIsConnected(false)
       }
     }
     checkConnection()
   }, [])
 
+  // Pass proper handlers to DataManagement
   return (
     <ThemeProvider defaultTheme="system" storageKey="ui-theme">
       <div className="min-h-screen bg-background">
@@ -78,15 +81,27 @@ function App() {
         </header>
         
         <main className="container py-8">
-          {activeView === 'data' && <DataManagement sources={[]} transfers={[]} searchResults={[]} onSearch={function (request: DataRequest): Promise<void> {
-            throw new Error("Function not implemented.")
-          } } onRequestData={function (peerId: string, request: DataRequest): Promise<void> {
-            throw new Error("Function not implemented.")
-          } } onClearSearch={function (): void {
-            throw new Error("Function not implemented.")
-          } } isLoading={false} setPollingEnabled={function (value: SetStateAction<boolean>): void {
-            throw new Error("Function not implemented.")
-          } } />}
+          {activeView === 'data' && (
+            <DataManagement 
+              sources={[]}
+              transfers={[]}
+              searchResults={[]}
+              onSearch={async (request) => {
+                // TODO: Implement search
+                console.log('Search request:', request)
+              }}
+              onRequestData={async (peerId, request) => {
+                // TODO: Implement data request
+                console.log('Request data:', peerId, request)
+              }}
+              onClearSearch={() => {
+                // TODO: Implement clear search
+                console.log('Clear search')
+              }}
+              isLoading={false}
+              setPollingEnabled={setIsPolling}
+            />
+          )}
           {activeView === 'peers' && <PeerManagement />}
         </main>
       </div>
