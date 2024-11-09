@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"p2p_market_data/pkg/p2p/message"
 
 	libp2pNetwork "github.com/libp2p/go-libp2p-core/network"
 	"go.uber.org/zap"
@@ -40,8 +41,8 @@ func (an *AuthorityNode) handleAuthorityStream(stream libp2pNetwork.Stream) {
 
 // Helper functions for stream reading/writing.
 
-func (an *AuthorityNode) readValidationRequest(stream libp2pNetwork.Stream) (*ValidationRequest, error) {
-	var req ValidationRequest
+func (an *AuthorityNode) readValidationRequest(stream libp2pNetwork.Stream) (*message.ValidationRequest, error) {
+	var req message.ValidationRequest
 	decoder := json.NewDecoder(stream)
 	if err := decoder.Decode(&req); err != nil {
 		return nil, fmt.Errorf("decoding validation request: %w", err)
@@ -58,7 +59,7 @@ func (an *AuthorityNode) writeValidationResponse(stream libp2pNetwork.Stream, re
 }
 
 func (an *AuthorityNode) writeErrorResponse(stream libp2pNetwork.Stream, err error) error {
-	resp := ErrorResponse{
+	resp := message.ErrorResponse{
 		Code:    500,
 		Message: "Internal Error",
 		Details: err.Error(),

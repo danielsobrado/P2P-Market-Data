@@ -1,4 +1,4 @@
-package p2p
+package host
 
 import (
 	"context"
@@ -11,6 +11,10 @@ import (
 )
 
 // NetworkManager handles P2P network operations
+const (
+	metricsCollectionInterval = 1 * time.Minute
+)
+
 type NetworkManager struct {
 	host        *Host
 	connManager *ConnectionManager
@@ -32,13 +36,13 @@ func NewNetworkManager(host *Host, logger *zap.Logger) (*NetworkManager, error) 
 
 	nm := &NetworkManager{
 		host:        host,
-		connManager: NewConnectionManager(host, logger),
-		peerManager: NewPeerManager(host, logger),
+		peerManager: NewPeerManager(host.host, logger),
 		metrics:     NewMetrics(),
 		logger:      logger,
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+	nm.connManager = NewConnectionManager(host.host, logger, nm)
 
 	// Start background processes
 	nm.wg.Add(2)

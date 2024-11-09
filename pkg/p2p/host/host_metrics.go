@@ -75,5 +75,14 @@ func (m *Metrics) UpdateNetworkLatency(duration time.Duration) {
 func (m *Metrics) GetMetrics() Metrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return *m
+	return Metrics{
+		ConnectedPeers:    m.ConnectedPeers,
+		TotalPeers:        m.TotalPeers,
+		MessagesProcessed: m.MessagesProcessed,
+		ValidationLatency: m.ValidationLatency,
+		NetworkLatency:    m.NetworkLatency,
+		FailedValidations: m.FailedValidations,
+		AvgLatency:       m.AvgLatency,
+		LastUpdated:      m.LastUpdated,
+	}
 }

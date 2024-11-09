@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"p2p_market_data/pkg/data"
+	"p2p_market_data/pkg/p2p/message"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"go.uber.org/zap"
@@ -36,7 +37,7 @@ func (h *Host) handleTopicMessages(ctx context.Context, topicName string, sub *p
 // processIncomingMessage deserializes and handles an incoming message
 func (h *Host) processIncomingMessage(msg *pubsub.Message) {
 	// Deserialize the message
-	receivedMsg := &Message{}
+	receivedMsg := &message.Message{}
 	if err := receivedMsg.Unmarshal(msg.Data); err != nil {
 		h.logger.Warn("Failed to unmarshal message", zap.Error(err))
 		return
@@ -50,12 +51,12 @@ func (h *Host) processIncomingMessage(msg *pubsub.Message) {
 
 	// Handle the message based on its type
 	switch receivedMsg.Type {
-	case MarketDataMessage:
+	case message.MarketDataMessage:
 		h.handleMarketDataMessage(receivedMsg)
 		h.metrics.IncrementMessagesProcessed()
-	case ValidationRequestMessage:
+	case message.ValidationRequestMessage:
 		h.handleValidationRequestMessage(receivedMsg)
-	case ValidationResponseMessage:
+	case message.ValidationResponseMessage:
 		h.handleValidationResponseMessage(receivedMsg)
 	default:
 		h.logger.Warn("Unknown message type", zap.String("type", string(receivedMsg.Type)))
@@ -63,8 +64,8 @@ func (h *Host) processIncomingMessage(msg *pubsub.Message) {
 }
 
 // handleMarketDataMessage handles incoming market data messages
-func (h *Host) handleMarketDataMessage(msg *Message) {
-	marketData, ok := msg.Payload.(*data.MarketData)
+func (h *Host) handleMarketDataMessage(msg *message.Message) {
+	marketData, ok := msg.Data.(*data.MarketData)
 	if !ok {
 		h.logger.Warn("Invalid market data message payload")
 		return
@@ -78,11 +79,11 @@ func (h *Host) handleMarketDataMessage(msg *Message) {
 }
 
 // handleValidationRequestMessage handles incoming validation requests
-func (h *Host) handleValidationRequestMessage(msg *Message) {
+func (h *Host) handleValidationRequestMessage(msg *message.Message) {
 	// Implement handling of validation requests
 }
 
 // handleValidationResponseMessage handles incoming validation responses
-func (h *Host) handleValidationResponseMessage(msg *Message) {
+func (h *Host) handleValidationResponseMessage(msg *message.Message) {
 	// Implement handling of validation responses
 }

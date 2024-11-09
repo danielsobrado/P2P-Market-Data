@@ -8,7 +8,7 @@ import (
 
 	"p2p_market_data/pkg/config"
 	"p2p_market_data/pkg/data"
-	"p2p_market_data/pkg/p2p"
+	"p2p_market_data/pkg/p2p/message"
 	"p2p_market_data/pkg/security"
 
 	libp2p "github.com/libp2p/go-libp2p"
@@ -38,22 +38,22 @@ type Host struct {
 	pubsub    *pubsub.PubSub
 	topics    map[string]*pubsub.Topic
 	subs      map[string]*pubsub.Subscription
-	peerStore *p2p.PeerStore
+	peerStore *PeerStore
 	validator *security.Validator
 	logger    *zap.Logger
 
 	// Channels for coordination
 	shutdown   chan struct{}
-	msgQueue   chan *p2p.Message
-	validation chan *p2p.ValidationRequest
+	msgQueue   chan *message.Message
+	validation chan *message.ValidationRequest
 
 	// Metrics and state
-	metrics *p2p.Metrics
-	status  *p2p.Status
+	metrics *Metrics
+	status  *Status
 	mu      sync.RWMutex
 
 	// Add the networkMgr field
-	networkMgr *p2p.NetworkManager
+	networkMgr *NetworkManager
 
 	ctx context.Context
 }
@@ -102,14 +102,14 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 		pubsub:     ps,
 		topics:     make(map[string]*pubsub.Topic),
 		subs:       make(map[string]*pubsub.Subscription),
-		peerStore:  p2p.NewPeerStore(repo),
+		peerStore:  NewPeerStore(repo),
 		validator:  validator,
 		logger:     logger,
 		shutdown:   make(chan struct{}),
-		msgQueue:   make(chan *p2p.Message, 1000),
-		validation: make(chan *p2p.ValidationRequest, 100),
-		metrics:    p2p.NewMetrics(),
-		status:     p2p.NewStatus(),
+		msgQueue:   make(chan *message.Message, 1000),
+		validation: make(chan *message.ValidationRequest, 100),
+		metrics:    NewMetrics(),
+		status:     NewStatus(),
 		ctx:        ctx,
 	}
 
@@ -123,7 +123,7 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 	host.setupProtocolHandlers()
 
 	// Initialize NetworkManager
-	networkMgr, err := p2p.NewNetworkManager(host, logger)
+	networkMgr, err := NewNetworkManager(host, logger)
 	if err != nil {
 		h.Close()
 		return nil, fmt.Errorf("failed to initialize network manager: %w", err)
@@ -217,7 +217,7 @@ func (h *Host) ShareData(ctx context.Context, marketData *data.MarketData) error
 	}
 
 	// Create message
-	msg := p2p.NewMessage(p2p.MarketDataMessage, marketData)
+	msg := message.NewMessage(message.MarketDataMessage, marketData)
 	msg.SenderID = h.host.ID()
 
 	// Sign message
@@ -253,10 +253,10 @@ func (h *Host) ShareData(ctx context.Context, marketData *data.MarketData) error
 }
 
 // RequestValidation initiates data validation process
-func (h *Host) RequestValidation(ctx context.Context, marketData *data.MarketData) (*p2p.ValidationResult, error) {
-	req := &p2p.ValidationRequest{
+func (h *Host) RequestValidation(ctx context.Context, marketData *data.MarketData) (*message.ValidationResult, error) {
+	req := &message.ValidationRequest{
 		MarketData: marketData,
-		ResponseCh: make(chan *p2p.ValidationResult, 1),
+		ResponseCh: make(chan *message.ValidationResult, 1),
 		Timestamp:  time.Now(),
 	}
 
@@ -304,8 +304,21 @@ func (h *Host) setupProtocolHandlers() {
 	// Implement protocol handlers as needed
 }
 
-func (h *Host) signMessage(msg *p2p.Message) error {
-	// Implement message signing
+// signMessage signs the message with the host's private key
+func (h *Host) signMessage(msg *message.Message) error {
+	// Serialize the message without the signature
+	dataToSign, err := msg.MarshalWithoutSignature()
+	if err != nil {
+		return fmt.Errorf("failed to marshal message for signing: %w", err)
+	}
+
+	// Sign the data
+	signature, err := h.host.Peerstore().PrivKey(h.host.ID()).Sign(dataToSign)
+	if err != nil {
+		return fmt.Errorf("failed to sign message: %w", err)
+	}
+
+	msg.Signature = signature
 	return nil
 }
 

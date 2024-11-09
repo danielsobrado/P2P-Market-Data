@@ -13,7 +13,7 @@ import (
 
 // AuthorityNode represents a node with authority privileges.
 type AuthorityNode struct {
-	host          *Host
+	host          *host.Host
 	validator     *security.Validator
 	networkMgr    *NetworkManager
 	verifiedPeers map[libp2pPeer.ID]*VerifiedPeer

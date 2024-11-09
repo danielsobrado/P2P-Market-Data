@@ -16,6 +16,22 @@ type AuthorityMetrics struct {
 	mu                   sync.RWMutex
 }
 
+// MetricsData represents network metrics data
+type MetricsData struct {
+	ConnectedPeers int
+	BandwidthIn    int64
+	BandwidthOut   int64
+	LastUpdateTime time.Time
+}
+
+// MetricsData represents network metrics
+type MetricsData struct {
+	ConnectedPeers int
+	BytesSent      int64
+	BytesReceived  int64
+	ActiveStreams  int
+}
+
 // NewAuthorityMetrics creates a new AuthorityMetrics instance.
 func NewAuthorityMetrics() *AuthorityMetrics {
 	return &AuthorityMetrics{}
@@ -69,4 +85,9 @@ func (an *AuthorityNode) GetStats() AuthorityStats {
 		VerifiedPeers:        len(an.verifiedPeers),
 		LastUpdate:           an.metrics.LastUpdate,
 	}
+}
+
+// GetMetrics returns the current metrics data
+func (m *Metrics) GetMetrics() *MetricsData {
+	return m.data
 }

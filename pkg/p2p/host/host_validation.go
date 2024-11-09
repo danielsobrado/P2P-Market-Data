@@ -2,33 +2,21 @@ package host
 
 import (
 	"context"
+	"p2p_market_data/pkg/data"
+	"p2p_market_data/pkg/p2p/message"
 	"time"
 
 	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
 )
 
-// processValidationRequests processes validation requests from the validation channel
-func (h *Host) processValidationRequests(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-h.shutdown:
-			return
-		case req := <-h.validation:
-			h.handleValidationRequest(ctx, req)
-		}
-	}
-}
-
 // handleValidationRequest handles a single validation request
-func (h *Host) handleValidationRequest(ctx context.Context, req *ValidationRequest) {
+func (h *Host) handleValidationRequest(ctx context.Context, req *message.ValidationRequest) {
 	startTime := time.Now()
 
 	// Perform validation using the validator
 	isValid, score := h.validator.Validate(req.MarketData)
 
-	result := &ValidationResult{
+	result := &message.ValidationResult{
 		MarketDataID: req.MarketData.ID,
 		IsValid:      isValid,
 		Score:        score,
@@ -48,4 +36,20 @@ func (h *Host) handleValidationRequest(ctx context.Context, req *ValidationReque
 	if !isValid {
 		h.metrics.IncrementFailedValidations()
 	}
+}
+
+// validateMarketData performs validation on the provided market data
+func (h *Host) validateMarketData(marketData *data.MarketData) *message.ValidationResult {
+	// Use the validator to validate the data
+	isValid, score := h.validator.Validate(marketData)
+
+	result := &message.ValidationResult{
+		MarketDataID: marketData.ID,
+		IsValid:      isValid,
+		Score:        score,
+		ValidatedBy:  []libp2pPeer.ID{h.host.ID()},
+		CompletedAt:  time.Now(),
+	}
+
+	return result
 }

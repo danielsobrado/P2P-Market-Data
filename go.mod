@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgconn v1.14.3
 	github.com/libp2p/go-libp2p v0.37.0
+	github.com/libp2p/go-libp2p-discovery v0.7.0
 	github.com/stretchr/testify v1.9.0
 	golang.org/x/crypto v0.28.0
 )

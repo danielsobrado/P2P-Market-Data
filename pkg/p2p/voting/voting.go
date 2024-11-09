@@ -8,7 +8,7 @@ import (
 
 	"p2p_market_data/pkg/config"
 	"p2p_market_data/pkg/data"
-	"p2p_market_data/pkg/p2p"
+	"p2p_market_data/pkg/p2p/message"
 	"p2p_market_data/pkg/p2p/host"
 
 	"go.uber.org/zap"
@@ -107,7 +107,7 @@ func (vs *VotingSystem) SubmitVote(vote *data.Vote) error {
 // Private methods
 
 func (vs *VotingSystem) broadcastVoteRequest(ctx context.Context, session *VotingSession) error {
-	msg := p2p.NewMessage(p2p.MessageType(VoteRequestMessage), &VoteRequest{
+	msg := message.NewMessage(message.MessageType(VoteRequestMessage), &VoteRequest{
 		MarketDataID: session.MarketData.ID,
 		Deadline:     time.Now().Add(vs.votingTimeout),
 		MinVotes:     vs.minVoters,

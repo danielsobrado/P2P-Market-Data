@@ -1,10 +1,11 @@
-package p2p
+package message
 
 import (
 	"encoding/json"
 	"time"
 
 	"p2p_market_data/pkg/data"
+	"p2p_market_data/pkg/p2p/utils"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 )
@@ -13,11 +14,12 @@ import (
 type MessageType string
 
 const (
-	MarketDataMessage MessageType = "MarketData"
-	ValidationMessage MessageType = "Validation"
+	MarketDataMessage         MessageType = "MarketData"
+	ValidationRequestMessage  MessageType = "ValidationRequest"
+	ValidationResponseMessage MessageType = "ValidationResponse"
 )
 
-// Message represents a P2P message
+// Message represents a P2P network message
 type Message struct {
 	Type      MessageType `json:"type"`
 	Version   string      `json:"version"`
@@ -33,7 +35,7 @@ func NewMessage(msgType MessageType, data interface{}) *Message {
 	return &Message{
 		Type:      msgType,
 		Version:   "1.0.0",
-		ID:        generateMessageID(),
+		ID:        utils.GenerateMessageID(),
 		Timestamp: time.Now(),
 		Data:      data,
 	}
@@ -42,6 +44,16 @@ func NewMessage(msgType MessageType, data interface{}) *Message {
 // Marshal serializes the message
 func (m *Message) Marshal() ([]byte, error) {
 	return json.Marshal(m)
+}
+
+// MarshalWithoutSignature serializes the message without the signature field
+func (m *Message) MarshalWithoutSignature() ([]byte, error) {
+	temp := &Message{
+		Type:     m.Type,
+		Data:     m.Data,
+		SenderID: m.SenderID,
+	}
+	return json.Marshal(temp)
 }
 
 // Unmarshal deserializes the message

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"p2p_market_data/pkg/config"
+	"p2p_market_data/pkg/p2p/message"
 
 	"github.com/libp2p/go-libp2p-core/crypto"
 )
@@ -43,26 +44,8 @@ func loadOrGenerateKey(keyFile string) (crypto.PrivKey, error) {
 	return priv, nil
 }
 
-// signMessage signs the message with the host's private key
-func (h *Host) signMessage(msg *Message) error {
-	// Serialize the message without the signature
-	dataToSign, err := msg.MarshalWithoutSignature()
-	if err != nil {
-		return fmt.Errorf("failed to marshal message for signing: %w", err)
-	}
-
-	// Sign the data
-	signature, err := h.host.Peerstore().PrivKey(h.host.ID()).Sign(dataToSign)
-	if err != nil {
-		return fmt.Errorf("failed to sign message: %w", err)
-	}
-
-	msg.Signature = signature
-	return nil
-}
-
 // verifyMessage verifies the message signature
-func (h *Host) verifyMessage(msg *Message) error {
+func (h *Host) verifyMessage(msg *message.Message) error {
 	// Serialize the message without the signature
 	dataToVerify, err := msg.MarshalWithoutSignature()
 	if err != nil {
