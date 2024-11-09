@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package splits;
+
+option java_package = "com.p2pmarketdata.splits";
+option java_multiple_files = true;
+
+message SplitData {
+  uint32 version = 1;  // Version of the data model
+
+  string symbol = 2;    // Ticker symbol
+  int64 split_date = 3; // Split effective date (Unix timestamp in seconds)
+  double ratio = 4;     // Split ratio (e.g., 2.0 for 2-for-1 split)
+
+  string source = 5;    // Source of the data (website name)
+
+  // Optional fields
+  string split_type = 6; // Type of split (e.g., "Stock Split", "Reverse Split")
+
+  map<string, string> metadata = 100;
+}

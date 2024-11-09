@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package dividends;
+
+option java_package = "com.p2pmarketdata.dividends";
+option java_multiple_files = true;
+
+message DividendData {
+  uint32 version = 1;  // Version of the data model
+
+  string symbol = 2;       // Ticker symbol
+  int64 ex_date = 3;       // Ex-dividend date (Unix timestamp in seconds)
+  int64 payment_date = 4;  // Payment date (Unix timestamp in seconds)
+  int64 record_date = 5;   // Record date (Unix timestamp in seconds)
+  int64 declared_date = 6; // Declaration date (Unix timestamp in seconds)
+  double amount = 7;       // Dividend amount per share
+
+  string source = 8;       // Source of the data (website name)
+
+  // Optional fields
+  string currency = 9;     // Currency code (e.g., "USD")
+  string frequency = 10;   // Dividend frequency (e.g., "Quarterly")
+
+  map<string, string> metadata = 100;
+}

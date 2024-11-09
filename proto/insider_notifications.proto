@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package insider;
+
+option java_package = "com.p2pmarketdata.insider";
+option java_multiple_files = true;
+
+message InsiderTransaction {
+  uint32 version = 1;  // Version of the data model
+
+  string symbol = 2;          // Ticker symbol
+  string insider_name = 3;    // Name of the insider
+  string insider_title = 4;   // Title or role of the insider (e.g., "CEO")
+  int64 transaction_date = 5; // Transaction date (Unix timestamp in seconds)
+  string transaction_type = 6; // Type of transaction (e.g., "Buy", "Sell")
+  uint64 shares_traded = 7;   // Number of shares traded
+  double price = 8;           // Price per share
+  uint64 shares_owned = 9;    // Shares owned after the transaction
+
+  string source = 10;         // Source of the data (website name)
+
+  // Optional fields
+  string sec_form_type = 11;     // SEC form type (e.g., "Form 4")
+  int64 filing_date = 12;        // Filing date (Unix timestamp in seconds)
+  string transaction_code = 13;  // Transaction code (e.g., "P" for Purchase)
+
+  map<string, string> metadata = 100;
+}

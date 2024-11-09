@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package marketdata;
+
+option java_package = "com.p2pmarketdata.marketdata";
+option java_multiple_files = true;
+
+message MarketData {
+  uint32 version = 1;  // Version of the data model
+
+  string symbol = 2;         // Ticker symbol (e.g., "AAPL")
+  string exchange = 3;       // Exchange code (e.g., "NASDAQ")
+  int64 timestamp = 4;       // Unix timestamp in seconds for the EOD data
+  double open = 5;           // Opening price
+  double high = 6;           // Highest price
+  double low = 7;            // Lowest price
+  double close = 8;          // Closing price
+  double adjusted_close = 9; // Adjusted closing price
+  uint64 volume = 10;        // Trading volume
+
+  string source = 11;        // Source of the data (website name)
+
+  // Optional fields
+  double pre_market_price = 12;   // Pre-market price
+  double after_hours_price = 13;  // After-hours price
+
+  // Metadata can hold any additional key-value pairs
+  map<string, string> metadata = 100;
+}
