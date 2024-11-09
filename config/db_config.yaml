@@ -1,0 +1,12 @@
+# config/db_config.yaml
+database:
+  name: your_database
+  user: your_username
+  password: your_password
+  host: localhost
+  port: 5432
+
+# Optional configurations
+migrations:
+  backup: true
+  dry_run: false
