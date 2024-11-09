@@ -52,13 +52,49 @@ wails dev
 wails build
 ```
 
-## Folders
+## Architecture
 
-├── cmd/           # Application entrypoints
-├── pkg/
-│   ├── config/    # Configuration handling
-│   ├── data/      # Data access layer
-│   ├── p2p/       # P2P networking
-│   └── scripts/   # Data source scripts
-└── frontend/      # React frontend
+```plaintext
+├── cmd/                    # Application entrypoints
+│   └── app/               # Main application
+├── pkg/                   # Core packages
+│   ├── config/           # Configuration management 
+│   │   └── loader.go     # YAML config loader
+│   ├── data/             # Data persistence
+│   │   ├── models/       # Data models
+│   │   ├── postgres/     # PostgreSQL implementation
+│   │   └── repository.go # Repository interfaces
+│   ├── p2p/              # P2P networking
+│   │   ├── host/         # libp2p host implementation
+│   │   ├── message/      # P2P message definitions
+│   │   └── protocol/     # Protocol handlers
+│   ├── scheduler/        # Data collection scheduling
+│   ├── scripts/          # Data source scripts
+│   └── utils/            # Common utilities
+└── frontend/             # React frontend
+    ├── src/              # Frontend source code
+    │   ├── components/   # React components
+    │   ├── hooks/        # Custom React hooks
+    │   └── types/        # TypeScript definitions
+    └── public/           # Static assets
+```
 
+## Process Details
+
+### Data Flow
+- External market data sources feed by using scrapping scripts (Can be shared)
+- Scheduler orchestrates data collection timing
+- Repository handles persistence and retrieval
+- P2P network enables decentralized data sharing
+- Frontend displays data through Backend API
+
+### Validation Flow
+- Collected data is broadcast to P2P network
+- Peers validate data authenticity and accuracy (Voting)
+- Consensus mechanism confirms validation
+- Peer reputation scores updated based on accuracy
+
+### Storage Flow
+- Validated market data stored in PostgreSQL
+- Peer network information persisted in PostgreSQL
+- System configuration managed via YAML files
