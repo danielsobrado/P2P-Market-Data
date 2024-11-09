@@ -16,12 +16,21 @@ type AuthorityMetrics struct {
 	mu                   sync.RWMutex
 }
 
+type Metrics struct {
+	mu   sync.RWMutex
+	data MetricsData
+}
+
 // MetricsData represents network metrics
 type MetricsData struct {
-	ConnectedPeers int
-	BytesSent      int64
-	BytesReceived  int64
-	ActiveStreams  int
+	ConnectedPeers    int
+	TotalPeers        int
+	MessagesProcessed int64
+	ValidationLatency time.Duration
+	NetworkLatency    time.Duration
+	FailedValidations int64
+	AvgLatency        time.Duration
+	LastUpdated       time.Time
 }
 
 // NewAuthorityMetrics creates a new AuthorityMetrics instance.
@@ -79,12 +88,6 @@ func (an *AuthorityNode) GetStats() AuthorityStats {
 	}
 }
 
-// In metrics.go
-type Metrics struct {
-	mu   sync.RWMutex
-	data MetricsData
-}
-
 // GetMetrics returns a copy of the metrics data without the mutex
 func (m *Metrics) GetMetrics() *MetricsData {
 	m.mu.RLock()
@@ -92,9 +95,13 @@ func (m *Metrics) GetMetrics() *MetricsData {
 
 	// Create a new MetricsData instance with copied values
 	return &MetricsData{
-		ConnectedPeers: m.data.ConnectedPeers,
-		BytesSent:      m.data.BytesSent,
-		BytesReceived:  m.data.BytesReceived,
-		ActiveStreams:  m.data.ActiveStreams,
+		ConnectedPeers:    m.data.ConnectedPeers,
+		TotalPeers:        m.data.TotalPeers,
+		MessagesProcessed: m.data.MessagesProcessed,
+		ValidationLatency: m.data.ValidationLatency,
+		NetworkLatency:    m.data.NetworkLatency,
+		FailedValidations: m.data.FailedValidations,
+		AvgLatency:        m.data.AvgLatency,
+		LastUpdated:       m.data.LastUpdated,
 	}
 }
