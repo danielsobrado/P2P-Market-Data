@@ -14,13 +14,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -169,15 +163,14 @@ const DataManagementComponent: React.FC<DataManagementProps> = ({
                   value={dataType}
                   onValueChange={(value: MarketDataType) => setDataType(value)}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose an option" />
-                  </SelectTrigger>
+                  <SelectTrigger />
                   <SelectContent>
                     <SelectItem value="EOD">End of Day</SelectItem>
                     <SelectItem value="DIVIDEND">Dividends</SelectItem>
                     <SelectItem value="INSIDER_TRADE">Insider Trading</SelectItem>
                   </SelectContent>
                 </Select>
+
               </div>
 
               <div className="space-y-2">
