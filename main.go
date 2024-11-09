@@ -24,7 +24,7 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:             "p2p_market_data2",
+		Title:             "P2P Stock Market Data",
 		Width:             1024,
 		Height:            768,
 		MinWidth:          1024,
