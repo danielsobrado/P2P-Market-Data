@@ -7,8 +7,9 @@ import (
 	"time"
 
 	"p2p_market_data/pkg/data"
+	"p2p_market_data/pkg/p2p/message"
 
-	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 )
 
 // ValidateData validates a single market data entry.
@@ -57,7 +58,7 @@ func (an *AuthorityNode) validateDataInternal(marketData *data.MarketData) *Vali
 	startTime := time.Now()
 	result := &ValidationResult{
 		MarketDataID: marketData.ID,
-		ValidatedBy:  []libp2pPeer.ID{an.host.host.ID()},
+		ValidatedBy:  []libp2pPeer.ID{an.host.ID()},
 		CompletedAt:  time.Now(),
 	}
 
@@ -85,8 +86,15 @@ func (an *AuthorityNode) processValidations(ctx context.Context) {
 				return
 			}
 			result := an.validateDataInternal(req.MarketData)
+			convertedResult := &message.ValidationResult{
+				// Populate necessary fields from result
+				IsValid:  result.IsValid,
+				Score:    result.Score,
+				ErrorMsg: result.ErrorMsg,
+				// Add other required fields
+			}
 			select {
-			case req.ResponseCh <- result:
+			case req.ResponseCh <- convertedResult:
 			case <-ctx.Done():
 				return
 			}

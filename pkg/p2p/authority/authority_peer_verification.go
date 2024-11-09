@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"p2p_market_data/pkg/p2p/host"
-
 	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
 	"go.uber.org/zap"
 )
@@ -29,7 +27,10 @@ func (an *AuthorityNode) VerifyPeer(ctx context.Context, peerID libp2pPeer.ID) (
 	}
 	an.mu.RUnlock()
 
-	pubKey := an.host.GetPeerstore().PubKey(peerID)
+	pubKey, err := an.host.GetPeerstore().PubKey(peerID)
+	if err != nil {
+		return nil, fmt.Errorf("getting peer public key: %w", err)
+	}
 	if pubKey == nil {
 		return nil, fmt.Errorf("peer public key not found")
 	}

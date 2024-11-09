@@ -32,6 +32,7 @@ type P2PConfig struct {
 	ValidationQuorum float64       `mapstructure:"validation_quorum"`
 	VotingTimeout    time.Duration `mapstructure:"voting_timeout"`
 	Topics           []string      `mapstructure:"topics"`
+	Security         *SecurityConfig
 }
 
 // ScriptConfig holds script execution related configuration

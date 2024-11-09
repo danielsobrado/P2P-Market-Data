@@ -13,6 +13,9 @@ import (
 
 	libp2p "github.com/libp2p/go-libp2p"
 	libp2pHost "github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
+	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"go.uber.org/zap"
 )
@@ -352,4 +355,19 @@ func (h *Host) GetTopic(name string) (*pubsub.Topic, error) {
 
 	h.topics[name] = topic
 	return topic, nil
+}
+
+// ID returns the peer ID of the host
+func (h *Host) ID() libp2pPeer.ID {
+	return h.host.ID()
+}
+
+// SetStreamHandler sets a handler for a specific protocol
+func (h *Host) SetStreamHandler(pid string, handler network.StreamHandler) {
+    h.host.SetStreamHandler(protocol.ID(pid), handler)
+}
+
+// RemoveStreamHandler removes a handler for a specific protocol
+func (h *Host) RemoveStreamHandler(pid string) {
+    h.host.RemoveStreamHandler(protocol.ID(pid))
 }
