@@ -52,7 +52,7 @@ wails dev
 wails build
 ```
 
-## Architecture
+## Directory Structure
 
 ```plaintext
 ├── cmd/                    # Application entrypoints
@@ -94,7 +94,7 @@ wails build
 - Consensus mechanism confirms validation
 - Peer reputation scores updated based on accuracy
 
-### Storage Flow
+### Storage
 - Validated market data stored in PostgreSQL
 - Peer network information persisted in PostgreSQL
 - System configuration managed via YAML files
