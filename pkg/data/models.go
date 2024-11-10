@@ -21,6 +21,13 @@ var (
 	ErrInvalidAmount    = errors.New("invalid amount")
 )
 
+const (
+	DataTypeEOD          = "EOD"
+	DataTypeDividend     = "DIVIDEND"
+	DataTypeInsiderTrade = "INSIDER_TRADE"
+	DataTypeSplit        = "SPLIT"
+)
+
 // MarketData represents a single market data point
 type MarketData struct {
 	ID              string            `json:"id"`
@@ -298,6 +305,26 @@ type MarketDataBase struct {
 	Metadata        map[string]string `json:"metadata"`
 }
 
+// Validate checks if the market data base is valid
+func (b *MarketDataBase) Validate() error {
+	if b.ID == "" {
+		return ErrInvalidID
+	}
+	if b.Symbol == "" {
+		return errors.New("symbol cannot be empty")
+	}
+	if b.Timestamp.IsZero() {
+		return ErrInvalidTime
+	}
+	if b.Source == "" {
+		return errors.New("source cannot be empty")
+	}
+	if b.DataType == "" {
+		return errors.New("data type cannot be empty")
+	}
+	return nil
+}
+
 // Extended market data types
 type EODData struct {
 	MarketDataBase
@@ -332,6 +359,68 @@ type InsiderTrade struct {
 	PricePerShare   float64   `json:"price_per_share"`
 	Value           float64   `json:"value"`
 	TransactionType string    `json:"transaction_type"`
+}
+
+// SplitData represents stock split information
+type SplitData struct {
+	MarketDataBase
+	SplitRatio      float64   `json:"split_ratio"`      // e.g., 2.0 for 2:1 split
+	AnnouncementDate time.Time `json:"announcement_date"`
+	ExDate          time.Time `json:"ex_date"`
+	OldShares       int       `json:"old_shares"`
+	NewShares       int       `json:"new_shares"`
+	Status          string    `json:"status"`           // announced, completed, cancelled
+}
+
+// Add validation method for SplitData
+func (s *SplitData) Validate() error {
+	if err := s.MarketDataBase.Validate(); err != nil {
+		return err
+	}
+	if s.SplitRatio <= 0 {
+		return errors.New("split ratio must be positive")
+	}
+	if s.ExDate.IsZero() {
+		return errors.New("ex-date is required")
+	}
+	if s.NewShares <= 0 || s.OldShares <= 0 {
+		return errors.New("shares count must be positive")
+	}
+	if s.Status == "" {
+		return errors.New("status is required")
+	}
+	return nil
+}
+
+// Add constructor
+func NewSplitData(
+	symbol string,
+	ratio float64,
+	exDate time.Time,
+	oldShares int,
+	newShares int,
+) (*SplitData, error) {
+	base := MarketDataBase{
+		ID:        uuid.New().String(),
+		Symbol:    symbol,
+		Timestamp: time.Now().UTC(),
+		DataType:  DataTypeSplit,
+	}
+
+	split := &SplitData{
+		MarketDataBase:   base,
+		SplitRatio:      ratio,
+		ExDate:          exDate,
+		OldShares:       oldShares,
+		NewShares:       newShares,
+		Status:          "announced",
+	}
+
+	if err := split.Validate(); err != nil {
+		return nil, err
+	}
+
+	return split, nil
 }
 
 // DataSource represents a data source in the network

@@ -17,6 +17,7 @@ declare global {
       main: {
         App: {
           // Data management
+          UploadMarketData: (formData: FormData) => Promise<void>;
           UpdateMarketData: (data: MarketDataBase[]) => Promise<void>;
           GetActiveTransfers: () => Promise<DataTransfer[]>;
           GetDataSources: () => Promise<DataSource[]>;

@@ -1,5 +1,5 @@
 // Market Data Types
-export type MarketDataType = 'EOD' | 'DIVIDEND' | 'INSIDER_TRADE'
+export type MarketDataType = 'EOD' | 'DIVIDEND' | 'INSIDER_TRADE' | 'SPLIT'
 export type TimeGranularity = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'
 
 export interface DataRequest {

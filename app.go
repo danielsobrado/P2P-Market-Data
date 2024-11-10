@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	postgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap"
@@ -556,4 +560,148 @@ func (a *App) ResetDataProcessing() error {
 
 func (a *App) RetryConnection() error {
 	return a.networkMgr.RetryConnection()
+}
+
+// UploadMarketData handles market data upload from CSV files
+func (a *App) UploadMarketData(formData map[string]interface{}) error {
+	file, ok := formData["file"].(*multipart.FileHeader)
+	if !ok {
+		return fmt.Errorf("invalid file format")
+	}
+
+	source := formData["source"].(string)
+	dataType := formData["type"].(string)
+
+	// Open uploaded file
+	f, err := file.Open()
+	if err != nil {
+		return fmt.Errorf("opening file: %w", err)
+	}
+	defer f.Close()
+
+	// Parse CSV
+	reader := csv.NewReader(f)
+	header, err := reader.Read()
+	if err != nil {
+		return fmt.Errorf("reading CSV header: %w", err)
+	}
+
+	// Process rows based on data type
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("reading CSV row: %w", err)
+		}
+
+		// Create market data based on type
+		var baseData *data.MarketData
+		switch dataType {
+		case data.DataTypeInsiderTrade:
+			insiderData := parseInsiderTradeData(header, row, source)
+			baseData, err = data.NewMarketData(
+				insiderData.Symbol,
+				insiderData.PricePerShare,
+				float64(insiderData.Shares),
+				source,
+				data.DataTypeInsiderTrade,
+			)
+			if err != nil {
+				return fmt.Errorf("creating market data: %w", err)
+			}
+			// Add insider specific metadata
+			baseData.MetaData["insider_name"] = insiderData.InsiderName
+			baseData.MetaData["position"] = insiderData.Position
+			baseData.MetaData["transaction_type"] = insiderData.TransactionType
+			// ... other cases ...
+		}
+
+		if err := a.repository.SaveMarketData(a.ctx, baseData); err != nil {
+			return fmt.Errorf("saving market data: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func parseEODData(header, row []string, source string) *data.EODData {
+	fmt.Println(header)
+
+	now := time.Now().UTC()
+	base := data.MarketDataBase{
+		ID:        uuid.New().String(),
+		Symbol:    row[0],
+		Source:    source,
+		DataType:  data.DataTypeEOD,
+		Timestamp: now,
+	}
+
+	return &data.EODData{
+		MarketDataBase: base,
+		Open:           parseFloat(row[1]),
+		High:           parseFloat(row[2]),
+		Low:            parseFloat(row[3]),
+		Close:          parseFloat(row[4]),
+		Volume:         parseFloat(row[5]),
+		Date:           now,
+	}
+}
+
+// Helper function to parse float values
+func parseFloat(s string) float64 {
+	f, _ := strconv.ParseFloat(s, 64)
+	return f
+}
+
+func parseInsiderTradeData(header, row []string, source string) *data.InsiderTrade {
+	fmt.Println(header)
+
+	now := time.Now().UTC()
+	base := data.MarketDataBase{
+		ID:        uuid.New().String(),
+		Symbol:    row[0],
+		Source:    source,
+		DataType:  data.DataTypeInsiderTrade,
+		Timestamp: now,
+	}
+
+	return &data.InsiderTrade{
+		MarketDataBase:  base,
+		InsiderName:     row[1],
+		InsiderTitle:    row[2],
+		Position:        row[3],
+		Shares:          parseInt(row[4]),
+		PricePerShare:   parseFloat(row[5]),
+		Value:           parseFloat(row[6]),
+		TransactionType: row[7],
+		TradeDate:       parseDate(row[8]),
+	}
+}
+
+func parseInt(s string) int64 {
+	i, _ := strconv.ParseInt(s, 10, 64)
+	return i
+}
+
+func parseDate(s string) time.Time {
+	t, _ := time.Parse("2006-01-02", s)
+	return t
+}
+
+// App struct method
+func (a *App) UploadFileData(ctx context.Context, formData map[string]interface{}) error {
+	file := formData["file"]
+	source := formData["source"].(string)
+	dataType := formData["type"].(string)
+
+	// Handle file upload logic here
+	// Parse the file and store data in your database
+	// print the file name, source and dataType
+	fmt.Println(file)
+	fmt.Println(source)
+	fmt.Println(dataType)
+
+	return nil
 }

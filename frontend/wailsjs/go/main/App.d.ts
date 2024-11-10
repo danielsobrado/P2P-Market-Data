@@ -3,6 +3,7 @@
 import {scripts} from '../models';
 import {data} from '../models';
 import {main} from '../models';
+import {context} from '../models';
 
 export function CheckConnection():Promise<boolean>;
 
@@ -43,5 +44,9 @@ export function SearchData(arg1:data.DataRequest):Promise<Array<data.DataSource>
 export function StopScript(arg1:string):Promise<void>;
 
 export function UninstallScript(arg1:string):Promise<void>;
+
+export function UploadFileData(arg1:context.Context,arg2:{[key: string]: any}):Promise<void>;
+
+export function UploadMarketData(arg1:{[key: string]: any}):Promise<void>;
 
 export function UploadScript(arg1:main.ScriptUploadData):Promise<void>;

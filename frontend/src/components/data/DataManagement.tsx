@@ -2,7 +2,7 @@
 import React from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import SearchDataTab from './tabs/SearchDataTab'
-import ViewDataTab from './tabs/ViewDataTab'
+import MarketDataTab from './tabs/MarketDataTab'
 import ActiveTransfersTab from './tabs/ActiveTransfersTab'
 import ScriptsTab from './tabs/ScriptsTab'
 import type { DataManagementProps } from './interfaces/DataManagementProps'
@@ -40,7 +40,7 @@ const DataManagement: React.FC<DataManagementProps> = ({
         </TabsContent>
 
         <TabsContent value="view">
-          <ViewDataTab
+          <MarketDataTab
             data={data}
             setData={setData}
             sources={sources}

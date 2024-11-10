@@ -82,6 +82,14 @@ export function UninstallScript(arg1) {
   return window['go']['main']['App']['UninstallScript'](arg1);
 }
 
+export function UploadFileData(arg1, arg2) {
+  return window['go']['main']['App']['UploadFileData'](arg1, arg2);
+}
+
+export function UploadMarketData(arg1) {
+  return window['go']['main']['App']['UploadMarketData'](arg1);
+}
+
 export function UploadScript(arg1) {
   return window['go']['main']['App']['UploadScript'](arg1);
 }

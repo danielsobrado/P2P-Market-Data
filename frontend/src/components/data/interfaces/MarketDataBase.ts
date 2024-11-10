@@ -11,7 +11,15 @@ export interface MarketDataBase {
   metadata?: { [key: string]: string };
 }
 
-export type MarketDataType = 'EOD' | 'DIVIDEND' | 'INSIDER_TRADE';
+export const MarketDataTypes = {
+  EOD: 'EOD',
+  DIVIDEND: 'DIVIDEND',
+  INSIDER_TRADE: 'INSIDER_TRADE',
+  SPLIT: 'SPLIT',
+} as const;
+
+export type MarketDataType = typeof MarketDataTypes[keyof typeof MarketDataTypes];
+
 export type TimeGranularity = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
 export interface DataSource {
