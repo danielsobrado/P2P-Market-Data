@@ -33,7 +33,7 @@ func main() {
 		Title:             "P2P Stock Market Data",
 		Width:             1280,
 		Height:            930,
-		MinWidth:          1280,
+		MinWidth:          1024,
 		MinHeight:         930,
 		MaxWidth:          1280,
 		MaxHeight:         1024,

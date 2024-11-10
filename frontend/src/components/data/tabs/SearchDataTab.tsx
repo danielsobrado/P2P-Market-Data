@@ -1,6 +1,6 @@
 // tabs/SearchDataTab.tsx
 import React, { useState } from 'react'
-import { format } from 'date-fns'
+import { format, isAfter, isBefore, startOfToday } from 'date-fns'
 import { Calendar } from '@/components/ui/calendar'
 import {
   Card,
@@ -116,7 +116,13 @@ const SearchDataTab: React.FC<SearchDataTabProps> = ({
               mode="single"
               selected={endDate}
               onSelect={setEndDate}
-              disabled={(date) => startDate ? date < startDate : false}
+              disabled={(date) => {
+                const today = startOfToday()
+                return !!(
+                  isAfter(date, today) || // Prevent future dates
+                  (startDate && isBefore(date, startDate)) // Ensure after start date
+                )
+              }}
             />
           </div>
 

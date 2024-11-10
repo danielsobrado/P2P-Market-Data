@@ -36,7 +36,7 @@ func main() {
 	}
 	defer logger.Sync()
 
-	// Load configurationc
+	// Load configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		logger.Fatal("Failed to load configuration",

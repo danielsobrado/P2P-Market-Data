@@ -25,7 +25,7 @@ const DataManagement: React.FC<DataManagementProps> = ({
       <Tabs defaultValue="search">
         <TabsList>
           <TabsTrigger value="search">Search Data</TabsTrigger>
-          <TabsTrigger value="view">View Data</TabsTrigger>
+          <TabsTrigger value="view">Market Data</TabsTrigger>
           <TabsTrigger value="transfers">Active Transfers</TabsTrigger>
           <TabsTrigger value="scripts">Scripts</TabsTrigger>
         </TabsList>
