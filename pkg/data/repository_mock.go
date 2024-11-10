@@ -34,6 +34,11 @@ func (m *MockRepository) DeleteMarketData(ctx context.Context, id string) error 
 	return nil
 }
 
+func (m *MockRepository) GetEODData(ctx context.Context, symbol, startDate, endDate string) ([]EODData, error) {
+	// Return empty slice and nil error for mock implementation
+	return []EODData{}, nil
+}
+
 // Vote operations
 func (m *MockRepository) SaveVote(ctx context.Context, vote *Vote) error {
 	return nil
@@ -73,6 +78,16 @@ func (m *MockRepository) SaveStake(ctx context.Context, stake *Stake) error {
 	return nil
 }
 
+// Dividend operations
+func (m *MockRepository) GetDividendData(ctx context.Context, symbol, startDate, endDate string) ([]DividendData, error) {
+	return []DividendData{}, nil
+}
+
+// Insider Data operations
+func (m *MockRepository) GetInsiderData(ctx context.Context, symbol, startDate, endDate string) ([]InsiderTrade, error) {
+	return []InsiderTrade{}, nil
+}
+
 func (m *MockRepository) GetStake(ctx context.Context, id string) (*Stake, error) {
 	return nil, ErrNotFound
 }
@@ -83,4 +98,9 @@ func (m *MockRepository) GetStakesByPeer(ctx context.Context, peerID string) ([]
 
 func (m *MockRepository) UpdateStake(ctx context.Context, stake *Stake) error {
 	return nil
+}
+
+// SearchData operation
+func (m *MockRepository) SearchData(ctx context.Context, request DataRequest) ([]DataSource, error) {
+	return []DataSource{}, nil
 }

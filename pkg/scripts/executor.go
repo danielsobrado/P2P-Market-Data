@@ -32,10 +32,11 @@ type ExecutionResult struct {
 
 // ScriptExecutor handles script execution with resource limits
 type ScriptExecutor struct {
-	config     *config.ScriptConfig
-	logger     *zap.Logger
-	metrics    *ExecutorMetrics
-	processMap sync.Map // maps script IDs to running processes
+	config        *config.ScriptConfig
+	logger        *zap.Logger
+	metrics       *ExecutorMetrics
+	processMap    sync.Map // maps script IDs to running processes
+	runningScripts sync.Map // tracks running scripts by ID
 }
 
 // ExecutorMetrics tracks script execution metrics
@@ -121,6 +122,9 @@ func (e *ScriptExecutor) runScript(ctx context.Context, scriptPath string, args 
 	// Store process for potential cancellation
 	e.processMap.Store(scriptPath, cmd.Process)
 	defer e.processMap.Delete(scriptPath)
+
+	e.runningScripts.Store(scriptPath, cmd)
+	defer e.runningScripts.Delete(scriptPath)
 
 	// Run script
 	err := cmd.Run()
@@ -313,4 +317,41 @@ func (e *ScriptExecutor) ExecuteScriptWithOutputCapture(ctx context.Context, scr
 	}
 
 	return result, nil
+}
+
+// StopScript stops a running script by ID
+func (e *ScriptExecutor) StopScript(scriptID string) error {
+    value, exists := e.runningScripts.Load(scriptID)
+    if !exists {
+        return fmt.Errorf("script %s is not running", scriptID)
+    }
+
+    cmd := value.(*exec.Cmd)
+    if cmd == nil || cmd.Process == nil {
+        e.runningScripts.Delete(scriptID)
+        return nil
+    }
+
+    // Try graceful shutdown first
+    if err := cmd.Process.Signal(os.Interrupt); err != nil {
+        e.logger.Warn("Failed to send interrupt signal", 
+            zap.String("scriptID", scriptID),
+            zap.Error(err))
+        
+        // Force kill if graceful shutdown fails
+        if err := cmd.Process.Kill(); err != nil {
+            return fmt.Errorf("failed to kill script: %w", err)
+        }
+    }
+
+    // Wait for process to exit
+    if err := cmd.Wait(); err != nil {
+        if _, ok := err.(*exec.ExitError); !ok {
+            return fmt.Errorf("error waiting for script to stop: %w", err)
+        }
+    }
+
+    e.runningScripts.Delete(scriptID)
+    e.logger.Info("Script stopped", zap.String("scriptID", scriptID))
+    return nil
 }

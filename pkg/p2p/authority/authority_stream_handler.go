@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"p2p_market_data/pkg/p2p/message"
 
-	libp2pNetwork "github.com/libp2p/go-libp2p-core/network"
+	libp2pNetwork "github.com/libp2p/go-libp2p/core/network"
 	"go.uber.org/zap"
 )
 

@@ -2,7 +2,9 @@ package host
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -12,10 +14,11 @@ import (
 	"p2p_market_data/pkg/security"
 
 	libp2p "github.com/libp2p/go-libp2p"
-	libp2pHost "github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/network"
-	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/protocol"
+	libp2pCrypto "github.com/libp2p/go-libp2p/core/crypto"
+	libp2pHost "github.com/libp2p/go-libp2p/core/host"
+	libp2pNetwork "github.com/libp2p/go-libp2p/core/network"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
+	libp2pProtocol "github.com/libp2p/go-libp2p/core/protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"go.uber.org/zap"
 )
@@ -27,7 +30,9 @@ const (
 	PeerDiscoveryProtocol  = "/p2p/discovery/1.0.0"
 
 	// Topics
-	MarketDataTopic = "MarketDataTopic"
+	MarketDataTopic    = "MarketDataTopic"
+	ValidationTopic    = "ValidationTopic"
+	PeerDiscoveryTopic = "PeerDiscoveryTopic"
 
 	// Timeouts
 	connectionTimeout = 30 * time.Second
@@ -55,7 +60,6 @@ type Host struct {
 	status  *Status
 	mu      sync.RWMutex
 
-	// Add the networkMgr field
 	networkMgr *NetworkManager
 
 	ctx context.Context
@@ -63,7 +67,7 @@ type Host struct {
 
 // NewHost creates a new P2P host
 func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo data.Repository) (*Host, error) {
-	if err := validateConfig(&cfg.P2P); err != nil {
+	if err := validateP2PConfig(&cfg.P2P); err != nil {
 		return nil, fmt.Errorf("invalid P2P configuration: %w", err)
 	}
 
@@ -78,7 +82,6 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 		libp2p.Identity(privKey),
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", cfg.P2P.Port)),
 		libp2p.EnableRelay(),
-		libp2p.EnableAutoRelay(),
 		libp2p.NATPortMap(),
 	)
 	if err != nil {
@@ -99,13 +102,16 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 		return nil, fmt.Errorf("failed to initialize validator: %w", err)
 	}
 
+	// Initialize PeerStore
+	peerStore := NewPeerStore(repo)
+
 	host := &Host{
 		cfg:        &cfg.P2P,
 		host:       h,
 		pubsub:     ps,
 		topics:     make(map[string]*pubsub.Topic),
 		subs:       make(map[string]*pubsub.Subscription),
-		peerStore:  NewPeerStore(repo),
+		peerStore:  peerStore,
 		validator:  validator,
 		logger:     logger,
 		shutdown:   make(chan struct{}),
@@ -147,6 +153,11 @@ func (h *Host) Start(ctx context.Context) error {
 	go h.processValidationRequests(ctx)
 	go h.collectMetrics(ctx)
 
+	// Start handling topic messages
+	for topicName, sub := range h.subs {
+		go h.handleTopicMessages(ctx, topicName, sub)
+	}
+
 	// Connect to bootstrap peers
 	if err := h.connectToBootstrapPeers(ctx); err != nil {
 		h.logger.Warn("Failed to connect to some bootstrap peers", zap.Error(err))
@@ -158,23 +169,6 @@ func (h *Host) Start(ctx context.Context) error {
 	h.mu.Unlock()
 
 	return nil
-}
-
-// collectMetrics periodically collects metrics from the host
-func (h *Host) collectMetrics(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-h.shutdown:
-			return
-		case <-ticker.C:
-			h.metrics.Collect(h)
-		}
-	}
 }
 
 // Stop gracefully shuts down the P2P host
@@ -283,9 +277,49 @@ func (h *Host) RequestValidation(ctx context.Context, marketData *data.MarketDat
 	}
 }
 
+// GetPeerInfo retrieves the address info of a peer by its ID
+func (h *Host) GetPeerInfo(peerID libp2pPeer.ID) (libp2pPeer.AddrInfo, error) {
+	addrs := h.host.Peerstore().Addrs(peerID)
+	if len(addrs) == 0 {
+		return libp2pPeer.AddrInfo{}, fmt.Errorf("no addresses found for peer %s", peerID)
+	}
+	return libp2pPeer.AddrInfo{
+		ID:    peerID,
+		Addrs: addrs,
+	}, nil
+}
+
+// DisconnectPeer disconnects from a peer by its ID
+func (h *Host) DisconnectPeer(peerID libp2pPeer.ID) error {
+	return h.host.Network().ClosePeer(peerID)
+}
+
+// ID returns the peer ID of the host
+func (h *Host) ID() libp2pPeer.ID {
+	return h.host.ID()
+}
+
+// SetStreamHandler sets a handler for a specific protocol
+func (h *Host) SetStreamHandler(pid string, handler libp2pNetwork.StreamHandler) {
+	h.host.SetStreamHandler(libp2pProtocol.ID(pid), handler)
+}
+
+// RemoveStreamHandler removes a handler for a specific protocol
+func (h *Host) RemoveStreamHandler(pid string) {
+	h.host.RemoveStreamHandler(libp2pProtocol.ID(pid))
+}
+
+// Close shuts down the host
+func (h *Host) Close() error {
+	return h.Stop()
+}
+
+// Helper methods and functions
+
+// initializeTopics initializes necessary pubsub topics
 func (h *Host) initializeTopics(ctx context.Context) error {
 	// Initialize necessary topics
-	topics := []string{"MarketDataTopic", "ValidationTopic"}
+	topics := []string{MarketDataTopic, ValidationTopic, PeerDiscoveryTopic}
 	for _, topicName := range topics {
 		topic, err := h.pubsub.Join(topicName)
 		if err != nil {
@@ -303,8 +337,161 @@ func (h *Host) initializeTopics(ctx context.Context) error {
 	return nil
 }
 
+// setupProtocolHandlers sets up handlers for specific protocols
 func (h *Host) setupProtocolHandlers() {
-	// Implement protocol handlers as needed
+	h.host.SetStreamHandler(libp2pProtocol.ID(PeerDiscoveryProtocol), h.handleDiscoveryStream)
+	h.host.SetStreamHandler(libp2pProtocol.ID(DataValidationProtocol), h.handleValidationStream)
+	h.host.SetStreamHandler(libp2pProtocol.ID(ProtocolID), h.handleStream)
+}
+
+// collectMetrics periodically collects metrics from the host
+func (h *Host) collectMetrics(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.shutdown:
+			return
+		case <-ticker.C:
+			h.metrics.Collect(h)
+		}
+	}
+}
+
+// processMessages processes incoming pubsub messages
+func (h *Host) processMessages(ctx context.Context) {
+	// The actual message processing is handled in handleTopicMessages
+	// This function can be used for additional processing if needed
+}
+
+// handleTopicMessages processes incoming messages from a topic
+func (h *Host) handleTopicMessages(ctx context.Context, topicName string, sub *pubsub.Subscription) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.shutdown:
+			return
+		default:
+			msg, err := sub.Next(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				h.logger.Warn("Error reading from subscription", zap.Error(err))
+				continue
+			}
+			// Process the message
+			h.processIncomingMessage(msg)
+		}
+	}
+}
+
+// processIncomingMessage deserializes and handles an incoming message
+func (h *Host) processIncomingMessage(msg *pubsub.Message) {
+	// Deserialize the message
+	receivedMsg := &message.Message{}
+	if err := receivedMsg.Unmarshal(msg.Data); err != nil {
+		h.logger.Warn("Failed to unmarshal message", zap.Error(err))
+		return
+	}
+
+	// Verify message signature
+	if err := h.verifyMessage(receivedMsg); err != nil {
+		h.logger.Warn("Failed to verify message signature", zap.Error(err))
+		return
+	}
+
+	// Handle the message based on its type
+	switch receivedMsg.Type {
+	case message.MarketDataMessage:
+		h.handleMarketDataMessage(receivedMsg)
+		h.metrics.IncrementMessagesProcessed()
+	case message.ValidationRequestMessage:
+		h.handleValidationRequestMessage(receivedMsg)
+	case message.ValidationResponseMessage:
+		h.handleValidationResponseMessage(receivedMsg)
+	default:
+		h.logger.Warn("Unknown message type", zap.String("type", string(receivedMsg.Type)))
+	}
+}
+
+// handleMarketDataMessage handles incoming market data messages
+func (h *Host) handleMarketDataMessage(msg *message.Message) {
+	marketData := &data.MarketData{}
+	if err := msg.DecodeData(marketData); err != nil {
+		h.logger.Warn("Invalid market data message payload", zap.Error(err))
+		return
+	}
+
+	h.logger.Info("Received market data",
+		zap.String("symbol", marketData.Symbol),
+		zap.Float64("price", marketData.Price))
+
+	// Optionally store or process the market data
+}
+
+// handleValidationRequestMessage handles incoming validation requests
+func (h *Host) handleValidationRequestMessage(msg *message.Message) {
+	// Implement handling of validation requests
+}
+
+// handleValidationResponseMessage handles incoming validation responses
+func (h *Host) handleValidationResponseMessage(msg *message.Message) {
+	// Implement handling of validation responses
+}
+
+// processValidationRequests processes validation requests from the channel
+func (h *Host) processValidationRequests(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.shutdown:
+			return
+		case req := <-h.validation:
+			go h.handleValidationRequest(ctx, req)
+		}
+	}
+}
+
+// handleValidationRequest handles a single validation request
+func (h *Host) handleValidationRequest(ctx context.Context, req *message.ValidationRequest) {
+	startTime := time.Now()
+
+	// Perform validation using the validator
+	isValid, score := h.validator.Validate(req.MarketData)
+
+	result := &message.ValidationResult{
+		MarketDataID: req.MarketData.ID,
+		IsValid:      isValid,
+		Score:        score,
+		CompletedAt:  time.Now(),
+		ValidatedBy:  []libp2pPeer.ID{h.host.ID()},
+	}
+
+	// Send result back to requester
+	select {
+	case req.ResponseCh <- result:
+	case <-ctx.Done():
+	}
+
+	// Update metrics
+	duration := time.Since(startTime)
+	h.metrics.UpdateValidationLatency(duration)
+	if !isValid {
+		h.metrics.IncrementFailedValidations()
+	}
+}
+
+// connectToBootstrapPeers connects to bootstrap peers
+func (h *Host) connectToBootstrapPeers(ctx context.Context) error {
+	// Implement bootstrap peer connection
+	// For example, read a list of bootstrap peers from the config and connect to them
+	return nil
 }
 
 // signMessage signs the message with the host's private key
@@ -316,7 +503,8 @@ func (h *Host) signMessage(msg *message.Message) error {
 	}
 
 	// Sign the data
-	signature, err := h.host.Peerstore().PrivKey(h.host.ID()).Sign(dataToSign)
+	privKey := h.host.Peerstore().PrivKey(h.host.ID())
+	signature, err := privKey.Sign(dataToSign)
 	if err != nil {
 		return fmt.Errorf("failed to sign message: %w", err)
 	}
@@ -325,49 +513,84 @@ func (h *Host) signMessage(msg *message.Message) error {
 	return nil
 }
 
-func (h *Host) processMessages(ctx context.Context) {
-	// Implement message processing
-}
+// verifyMessage verifies the message signature
+func (h *Host) verifyMessage(msg *message.Message) error {
+	// Serialize the message without the signature
+	dataToVerify, err := msg.MarshalWithoutSignature()
+	if err != nil {
+		return fmt.Errorf("failed to marshal message for verification: %w", err)
+	}
 
-func (h *Host) processValidationRequests(ctx context.Context) {
-	// Implement validation request processing
-}
+	// Get the public key of the sender
+	pubKey := h.host.Peerstore().PubKey(msg.SenderID)
+	if pubKey == nil {
+		return fmt.Errorf("public key not found for sender: %s", msg.SenderID)
+	}
 
-func (h *Host) connectToBootstrapPeers(ctx context.Context) error {
-	// Implement bootstrap peer connection
+	// Verify the signature
+	if ok, err := pubKey.Verify(dataToVerify, msg.Signature); err != nil || !ok {
+		return fmt.Errorf("signature verification failed")
+	}
+
 	return nil
 }
 
-// GetTopic returns a pubsub topic by name, creating it if it doesn't exist
-func (h *Host) GetTopic(name string) (*pubsub.Topic, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// loadOrGenerateKey loads the private key from file or generates a new one
+func loadOrGenerateKey(keyFile string) (libp2pCrypto.PrivKey, error) {
+	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
+		// Generate new key
+		priv, _, err := libp2pCrypto.GenerateKeyPairWithReader(libp2pCrypto.RSA, 2048, rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate key: %w", err)
+		}
 
-	if topic, exists := h.topics[name]; exists {
-		return topic, nil
+		// Save key to file
+		keyBytes, err := libp2pCrypto.MarshalPrivateKey(priv)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal private key: %w", err)
+		}
+		if err := os.WriteFile(keyFile, keyBytes, 0600); err != nil {
+			return nil, fmt.Errorf("failed to save key to file: %w", err)
+		}
+
+		return priv, nil
 	}
 
-	// Create new topic if it doesn't exist
-	topic, err := h.pubsub.Join(name)
+	// Load key from file
+	keyBytes, err := os.ReadFile(keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to join topic %s: %w", name, err)
+		return nil, fmt.Errorf("failed to read key file: %w", err)
+	}
+	priv, err := libp2pCrypto.UnmarshalPrivateKey(keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal private key: %w", err)
 	}
 
-	h.topics[name] = topic
+	return priv, nil
+}
+
+// validateConfig validates the P2P configuration
+func validateP2PConfig(cfg *config.P2PConfig) error {
+	if cfg.Port <= 0 || cfg.Port > 65535 {
+		return fmt.Errorf("invalid port number: %d", cfg.Port)
+	}
+	return nil
+}
+
+// GetTopic returns a pubsub topic by name
+func (h *Host) GetTopic(topicName string) (*pubsub.Topic, error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	topic, exists := h.topics[topicName]
+	if !exists {
+		return nil, fmt.Errorf("topic not found: %s", topicName)
+	}
+
 	return topic, nil
 }
 
-// ID returns the peer ID of the host
-func (h *Host) ID() libp2pPeer.ID {
-	return h.host.ID()
-}
-
-// SetStreamHandler sets a handler for a specific protocol
-func (h *Host) SetStreamHandler(pid string, handler network.StreamHandler) {
-    h.host.SetStreamHandler(protocol.ID(pid), handler)
-}
-
-// RemoveStreamHandler removes a handler for a specific protocol
-func (h *Host) RemoveStreamHandler(pid string) {
-    h.host.RemoveStreamHandler(protocol.ID(pid))
+// StringToPeerID converts a string to a libp2p PeerID
+func (h *Host) StringToPeerID(peerIDStr string) (libp2pPeer.ID, error) {
+	return libp2pPeer.Decode(peerIDStr)
 }

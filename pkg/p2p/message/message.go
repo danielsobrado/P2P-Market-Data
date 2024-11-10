@@ -7,7 +7,7 @@ import (
 	"p2p_market_data/pkg/data"
 	"p2p_market_data/pkg/p2p/utils"
 
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // MessageType represents the type of message
@@ -83,4 +83,16 @@ type ErrorResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Details string `json:"details,omitempty"`
+}
+
+// DecodeData decodes the message data into the provided interface
+func (m *Message) DecodeData(v interface{}) error {
+	// Convert Data to JSON bytes first since it's stored as interface{}
+	jsonBytes, err := json.Marshal(m.Data)
+	if err != nil {
+		return err
+	}
+
+	// Unmarshal into provided interface
+	return json.Unmarshal(jsonBytes, v)
 }

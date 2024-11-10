@@ -328,7 +328,7 @@ function calculatePayoutFrequency(data: DividendData[]): string {
 function findSignificantTransactions(data: InsiderTrade[]): InsiderTrade[] {
   const significantThreshold = 100000; // Example threshold for significant trades
 
-  return data.filter(trade => trade.amount * trade.price >= significantThreshold);
+  return data.filter(trade => trade.value >= significantThreshold);
 }
 function aggregateDividendData(data: DividendData[], granularity: TimeGranularity): any {
   const aggregatedData: { [key: string]: DividendData } = {}
@@ -391,7 +391,8 @@ function aggregateInsiderData(data: InsiderTrade[], granularity: TimeGranularity
     if (!aggregatedData[key]) {
       aggregatedData[key] = { ...item }
     } else {
-      aggregatedData[key].amount += item.amount
+      aggregatedData[key].value += item.value
+      aggregatedData[key].shares += item.shares
     }
   })
 
@@ -435,4 +436,3 @@ function aggregateEODData(data: EODData[], granularity: TimeGranularity): any {
 
   return Object.values(aggregatedData)
 }
-

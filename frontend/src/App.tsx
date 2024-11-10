@@ -19,6 +19,7 @@ function App() {
   const [isConnected, setIsConnected] = useState(false)
   const [activeView, setActiveView] = useState('data')
   const [isPolling, setIsPolling] = useState(false)
+  const [data, setData] = useState<any[]>([])
 
   // Check connection status
   useEffect(() => {
@@ -80,12 +81,14 @@ function App() {
           </div>
         </header>
         
-        <main className="container py-8">
-          {activeView === 'data' && (
+          <main>
+            {activeView === 'data' && (
             <DataManagement 
               sources={[]}
               transfers={[]}
               searchResults={[]}
+              data={data}
+              setData={setData}
               onSearch={async (request) => {
                 // TODO: Implement search
                 console.log('Search request:', request)

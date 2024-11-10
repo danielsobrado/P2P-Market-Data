@@ -10,28 +10,22 @@ import (
 type Validator struct {
 	minReputationScore float64
 	maxPenalty         float64
-	// Add other fields as necessary, e.g., validation rules, data sources
+	minConfidence      float64
 }
 
 // NewValidator creates a new Validator instance with the provided configuration.
 func NewValidator(cfg config.SecurityConfig) (*Validator, error) {
-	// Validate configuration values
-	if cfg.MinReputationScore < 0 || cfg.MinReputationScore > 1 {
-		return nil, fmt.Errorf("min_reputation_score must be between 0 and 1")
-	}
 	if cfg.MaxPenalty <= 0 || cfg.MaxPenalty > 1 {
 		return nil, fmt.Errorf("max_penalty must be between 0 and 1")
 	}
-
-	validator := &Validator{
-		minReputationScore: cfg.MinReputationScore,
-		maxPenalty:         cfg.MaxPenalty,
-		// Initialize other fields as necessary
+	if cfg.MinConfidence <= 0 || cfg.MinConfidence > 1 {
+		return nil, fmt.Errorf("min_confidence must be between 0 and 1")
 	}
-
-	// Additional initialization logic if needed, such as loading validation rules
-
-	return validator, nil
+	// Initialize other fields and return the Validator
+	return &Validator{
+		maxPenalty:    cfg.MaxPenalty,
+		minConfidence: cfg.MinConfidence,
+	}, nil
 }
 
 // Validate runs the market data through the validation process.

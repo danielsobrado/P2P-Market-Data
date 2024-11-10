@@ -1,85 +1,77 @@
-// DataManagementComponent.tsx
-import React, { useState, useEffect } from 'react'
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs'
-import { DataManagementProps } from './interfaces/DataManagementProps'
+// components/data/DataManagement.tsx
+import React from 'react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import SearchDataTab from './tabs/SearchDataTab'
-import DataSourcesTab from './tabs/DataSourcesTab'
-import ActiveTransfersTab from './tabs/ActiveTransfersTab'
 import ViewDataTab from './tabs/ViewDataTab'
+import ActiveTransfersTab from './tabs/ActiveTransfersTab'
 import ScriptsTab from './tabs/ScriptsTab'
-import { MarketData } from './interfaces/MarketData'
-import { ScriptInfo } from './interfaces/ScriptInfo'
+import type { DataManagementProps } from './interfaces/DataManagementProps'
 
-const DataManagementComponent: React.FC<DataManagementProps> = ({
+const DataManagement: React.FC<DataManagementProps> = ({
+  data,
+  setData,
   sources,
   transfers,
   searchResults,
   onSearch,
   onRequestData,
-  setPollingEnabled,
-  onError,
+  onClearSearch,
+  isLoading,
+  setPollingEnabled: setPollingEnabledProp,
+  onError
 }) => {
-  const [data, setData] = useState<MarketData[]>([])
-  const [scripts, setScripts] = useState<ScriptInfo[]>([])
-
-  useEffect(() => {
-    setPollingEnabled(true)
-    return () => setPollingEnabled(false)
-  }, [setPollingEnabled])
-
   return (
-    <Tabs defaultValue="search" className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="search">Search Data</TabsTrigger>
-        <TabsTrigger value="sources">Data Sources</TabsTrigger>
-        <TabsTrigger value="transfers">Active Transfers</TabsTrigger>
-        <TabsTrigger value="view">View Data</TabsTrigger>
-        {/* <TabsTrigger value="analytics">Analytics</TabsTrigger> */}
-        <TabsTrigger value="scripts">Scripts</TabsTrigger>
-      </TabsList>
+    <div className="container py-8">
+      <Tabs defaultValue="search">
+        <TabsList>
+          <TabsTrigger value="search">Search Data</TabsTrigger>
+          <TabsTrigger value="view">View Data</TabsTrigger>
+          <TabsTrigger value="transfers">Active Transfers</TabsTrigger>
+          <TabsTrigger value="scripts">Scripts</TabsTrigger>
+        </TabsList>
 
-      <TabsContent value="search" className="space-y-4">
-        <SearchDataTab
-          searchResults={searchResults}
-          onSearch={onSearch}
-          onRequestData={onRequestData}
-          onError={onError}
-        />
-      </TabsContent>
+        <TabsContent value="search">
+          <SearchDataTab
+            searchResults={searchResults}
+            onSearch={onSearch}
+            onRequestData={onRequestData}
+            onError={onError}
+          />
+        </TabsContent>
 
-      <TabsContent value="sources">
-        <DataSourcesTab sources={sources} />
-      </TabsContent>
+        <TabsContent value="view">
+          <ViewDataTab
+            data={data}
+            setData={setData}
+            sources={sources}
+            transfers={transfers}
+            searchResults={searchResults}
+            onSearch={onSearch}
+            onRequestData={onRequestData}
+            onClearSearch={onClearSearch}
+            isLoading={isLoading}
+            onError={onError}
+            setPollingEnabled={(value) => setPollingEnabledProp(typeof value === 'function' ? value(false) : value)}
+          />
+        </TabsContent>
 
-      <TabsContent value="transfers">
-        <ActiveTransfersTab
-          transfers={transfers}
-          setPollingEnabled={setPollingEnabled}
-        />
-      </TabsContent>
+        <TabsContent value="transfers">
+          <ActiveTransfersTab
+            transfers={transfers}
+            setPollingEnabled={(value) => setPollingEnabledProp(typeof value === 'function' ? value(false) : value)}
+          />
+        </TabsContent>
 
-      <TabsContent value="view">
-        <ViewDataTab
-          data={data}
-          setData={setData}
-          onError={onError}
-        />
-      </TabsContent>
-
-      <TabsContent value="scripts">
-        <ScriptsTab
-          scripts={scripts}
-          setScripts={setScripts}
-          onError={onError}
-        />
-      </TabsContent>
-    </Tabs>
+        <TabsContent value="scripts">
+          <ScriptsTab
+            scripts={[]} // Pass scripts state
+            setScripts={() => {}} // Pass setScripts function
+            onError={onError}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
   )
 }
 
-export default DataManagementComponent
+export default DataManagement

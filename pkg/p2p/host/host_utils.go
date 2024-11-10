@@ -7,11 +7,11 @@ import (
 	"p2p_market_data/pkg/config"
 	"p2p_market_data/pkg/p2p/message"
 
-	"github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p/core/crypto"
 )
 
-// loadOrGenerateKey loads the private key from file or generates a new one
-func loadOrGenerateKey(keyFile string) (crypto.PrivKey, error) {
+// loadOrGenerateHostKey loads the private key from file or generates a new one
+func loadOrGenerateHostKey(keyFile string) (crypto.PrivKey, error) {
 	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
 		// Generate new key
 		priv, _, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
@@ -44,8 +44,8 @@ func loadOrGenerateKey(keyFile string) (crypto.PrivKey, error) {
 	return priv, nil
 }
 
-// verifyMessage verifies the message signature
-func (h *Host) verifyMessage(msg *message.Message) error {
+// verifyMessageSignature verifies the message signature
+func (h *Host) verifyMessageSignature(msg *message.Message) error {
 	// Serialize the message without the signature
 	dataToVerify, err := msg.MarshalWithoutSignature()
 	if err != nil {

@@ -1,14 +1,17 @@
 package data
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+// Error variables for consistent error handling
 var (
 	ErrInvalidData      = errors.New("invalid data format")
 	ErrInvalidID        = errors.New("invalid identifier")
@@ -96,8 +99,8 @@ func (md *MarketData) Validate() error {
 func (md *MarketData) UpdateHash() {
 	hasher := sha256.New()
 	hasher.Write([]byte(md.Symbol))
-	hasher.Write([]byte(string(rune(md.Price))))
-	hasher.Write([]byte(string(rune(md.Volume))))
+	hasher.Write([]byte(fmt.Sprintf("%f", md.Price)))
+	hasher.Write([]byte(fmt.Sprintf("%f", md.Volume)))
 	hasher.Write([]byte(md.Timestamp.String()))
 	hasher.Write([]byte(md.Source))
 	md.Hash = hex.EncodeToString(hasher.Sum(nil))
@@ -278,6 +281,117 @@ func (m Metadata) Validate() error {
 }
 
 // MarketDataRepository represents a data repository for market data
-type MarketDataRepository struct {
-	// Add fields as needed
+type MarketDataRepository interface {
+	// Define repository methods as needed
+}
+
+// MarketDataBase serves as a base struct for different market data types
+type MarketDataBase struct {
+	ID              string            `json:"id"`
+	Symbol          string            `json:"symbol"`
+	Timestamp       time.Time         `json:"timestamp"`
+	Source          string            `json:"source"`
+	DataType        string            `json:"data_type"`
+	ValidationScore float64           `json:"validation_score"`
+	UpVotes         int               `json:"up_votes"`
+	DownVotes       int               `json:"down_votes"`
+	Metadata        map[string]string `json:"metadata"`
+}
+
+// Extended market data types
+type EODData struct {
+	MarketDataBase
+	Open          float64   `json:"open"`
+	High          float64   `json:"high"`
+	Low           float64   `json:"low"`
+	Close         float64   `json:"close"`
+	Volume        float64   `json:"volume"`
+	AdjustedClose float64   `json:"adjusted_close"`
+	Date          time.Time `json:"date"`
+}
+
+type DividendData struct {
+	MarketDataBase
+	Amount          float64   `json:"amount"`
+	ExDate          time.Time `json:"ex_date"`
+	PayDate         time.Time `json:"pay_date"`
+	RecordDate      time.Time `json:"record_date"`
+	DeclarationDate time.Time `json:"declaration_date"`
+	Frequency       string    `json:"frequency"`
+	Type            string    `json:"type"`
+}
+
+type InsiderTrade struct {
+	MarketDataBase
+	InsiderName     string    `json:"insider_name"`
+	InsiderTitle    string    `json:"insider_title"`
+	TradeType       string    `json:"trade_type"`
+	TradeDate       time.Time `json:"trade_date"`
+	Position        string    `json:"position"`
+	Shares          int64     `json:"shares"`
+	PricePerShare   float64   `json:"price_per_share"`
+	Value           float64   `json:"value"`
+	TransactionType string    `json:"transaction_type"`
+}
+
+// DataSource represents a data source in the network
+type DataSource struct {
+	ID               string    `json:"id"`
+	PeerID           string    `json:"peer_id"`
+	Reputation       float64   `json:"reputation"`
+	DataTypes        []string  `json:"data_types"`
+	AvailableSymbols []string  `json:"available_symbols"`
+	DataRangeStart   time.Time `json:"data_range_start"`
+	DataRangeEnd     time.Time `json:"data_range_end"`
+	LastUpdate       time.Time `json:"last_update"`
+	Reliability      float64   `json:"reliability"`
+}
+
+// DataRequest represents a request for data
+type DataRequest struct {
+	Type        string    `json:"type"`
+	Symbol      string    `json:"symbol"`
+	StartDate   time.Time `json:"start_date"`
+	EndDate     time.Time `json:"end_date"`
+	Granularity string    `json:"granularity"`
+}
+
+// Implement GetDataSources in PostgresRepository
+func (r *PostgresRepository) GetDataSources(ctx context.Context) ([]DataSource, error) {
+	query := `
+        SELECT peer_id, reputation, data_types, available_symbols, 
+               data_range_start, data_range_end, last_update, reliability
+        FROM data_sources`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("querying data sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []DataSource
+	for rows.Next() {
+		var s DataSource
+		err := rows.Scan(&s.PeerID, &s.Reputation, &s.DataTypes, &s.AvailableSymbols,
+			&s.DataRangeStart, &s.DataRangeEnd, &s.LastUpdate, &s.Reliability)
+		if err != nil {
+			return nil, fmt.Errorf("scanning data source: %w", err)
+		}
+		sources = append(sources, s)
+	}
+
+	return sources, nil
+}
+
+// Implement GetDataSources in MockRepository
+func (m *MockRepository) GetDataSources(ctx context.Context) ([]DataSource, error) {
+	// Return mock data sources
+	return []DataSource{}, nil
+}
+
+// SearchResult represents a search result item
+type SearchResult struct {
+	ID    string
+	Score float64
+	// Add other relevant fields
 }

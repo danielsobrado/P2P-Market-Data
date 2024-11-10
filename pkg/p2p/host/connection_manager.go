@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/host"
-	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/host"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap"
 )
 

@@ -6,11 +6,11 @@ import (
 	"p2p_market_data/pkg/p2p/message"
 	"time"
 
-	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 )
 
-// handleValidationRequest handles a single validation request
-func (h *Host) handleValidationRequest(ctx context.Context, req *message.ValidationRequest) {
+// processValidationRequest handles a single validation request
+func (h *Host) processValidationRequest(ctx context.Context, req *message.ValidationRequest) {
 	startTime := time.Now()
 
 	// Perform validation using the validator

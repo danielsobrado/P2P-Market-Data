@@ -7,85 +7,60 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Progress } from '@/components/ui/progress'
-import { RefreshCw } from 'lucide-react'
-import { format } from 'date-fns'
-import { fetchData } from '../utils/fetchData'
-import type { MarketData } from '../interfaces/MarketData'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { MarketDataType } from '@/types/marketData'
+import EODDataTab from './EODDataTab'
+import DividendDataTab from './DividendDataTab'
+import InsiderTradeDataTab from './InsiderTradeDataTab'
+import SplitDataTab from './SplitDataTab'
+import { ViewDataTabProps } from '../interfaces/ViewDataTabProps'
 
-interface ViewDataTabProps {
-  data: MarketData[];
-  setData: React.Dispatch<React.SetStateAction<MarketData[]>>;
-  onError?: (error: Error) => void;
-}
-
-const ViewDataTab: React.FC<ViewDataTabProps> = ({ data, setData, onError }) => {
-  const [searchQuery, setSearchQuery] = useState('')
-
-  const handleFetchData = async () => {
-    try {
-      const result = await fetchData()
-      setData(result)
-    } catch (error) {
-      onError?.(error as Error)
-    }
-  }
+const ViewDataTab: React.FC<ViewDataTabProps> = ({ 
+  data, 
+  setData, 
+  sources,
+  transfers,
+  searchResults,
+  onSearch,
+  onRequestData,
+  onClearSearch,
+  isLoading,
+  setPollingEnabled,
+  onError 
+}) => {
+  const [activeTab, setActiveTab] = useState<MarketDataType>('EOD')
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Market Data Management</CardTitle>
+        <CardTitle>Market Data</CardTitle>
         <CardDescription>View and manage market data entries</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="flex gap-4 mb-4">
-          <Input
-            placeholder="Search..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="max-w-sm"
-          />
-          <Button onClick={handleFetchData}>
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-        <ScrollArea className="h-[400px]">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Volume</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Validation</TableHead>
-                <TableHead>Timestamp</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data
-                .filter((item) =>
-                  item.symbol.toLowerCase().includes(searchQuery.toLowerCase())
-                )
-                .map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>{item.symbol}</TableCell>
-                    <TableCell>{item.price}</TableCell>
-                    <TableCell>{item.volume}</TableCell>
-                    <TableCell>{item.source}</TableCell>
-                    <TableCell>
-                      <Progress value={item.validationScore * 100} />
-                    </TableCell>
-                    <TableCell>{format(new Date(item.timestamp), 'PPpp')}</TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
-        </ScrollArea>
+        <Tabs value={activeTab} onValueChange={(value: string) => setActiveTab(value as MarketDataType)}>
+          <TabsList>
+            <TabsTrigger value="EOD">End of Day</TabsTrigger>
+            <TabsTrigger value="DIVIDEND">Dividends</TabsTrigger>
+            <TabsTrigger value="INSIDER_TRADE">Insider Trades</TabsTrigger>
+            <TabsTrigger value="SPLIT">Splits</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="EOD">
+            <EODDataTab onError={onError} />
+          </TabsContent>
+
+          <TabsContent value="DIVIDEND">
+            <DividendDataTab onError={onError} />
+          </TabsContent>
+
+          <TabsContent value="INSIDER_TRADE">
+            <InsiderTradeDataTab onError={onError} />
+          </TabsContent>
+
+          <TabsContent value="SPLIT">
+            <SplitDataTab onError={onError} />
+          </TabsContent>
+        </Tabs>
       </CardContent>
     </Card>
   )

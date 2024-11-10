@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"p2p_market_data/pkg/config"
+
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -44,6 +46,13 @@ type Repository interface {
 	GetStake(ctx context.Context, id string) (*Stake, error)
 	GetStakesByPeer(ctx context.Context, peerID string) ([]*Stake, error)
 	UpdateStake(ctx context.Context, stake *Stake) error
+
+	// Data retrieval methods
+	GetEODData(ctx context.Context, symbol, startDate, endDate string) ([]EODData, error)
+	GetDividendData(ctx context.Context, symbol, startDate, endDate string) ([]DividendData, error)
+	GetInsiderData(ctx context.Context, symbol, startDate, endDate string) ([]InsiderTrade, error)
+	GetDataSources(ctx context.Context) ([]DataSource, error)
+	SearchData(ctx context.Context, request DataRequest) ([]DataSource, error)
 }
 
 // MarketDataFilter defines filter parameters for market data queries
@@ -398,6 +407,30 @@ func (r *PostgresRepository) GetVotesByValidator(ctx context.Context, validatorI
 	return r.queryVotes(ctx, query, validatorID)
 }
 
+// GetInsiderData retrieves insider trade data based on symbol and date range
+func (r *PostgresRepository) GetInsiderData(ctx context.Context, symbol, startDate, endDate string) ([]InsiderTrade, error) {
+	// TODO: Implement actual database query
+	return nil, nil
+}
+
+// GetDividendData retrieves dividend data based on symbol and date range
+func (r *PostgresRepository) GetDividendData(ctx context.Context, symbol, startDate, endDate string) ([]DividendData, error) {
+	// TODO: Implement actual database query
+	return nil, nil
+}
+
+// SearchData implements the Repository interface for searching data sources
+func (r *PostgresRepository) SearchData(ctx context.Context, request DataRequest) ([]DataSource, error) {
+	// TODO: Implement actual database query
+	return nil, nil
+}
+
+// GetEODData retrieves end-of-day data based on symbol and date range
+func (r *PostgresRepository) GetEODData(ctx context.Context, symbol, startDate, endDate string) ([]EODData, error) {
+	// TODO: Implement actual database query
+	return nil, nil
+}
+
 // Helper function to query votes
 func (r *PostgresRepository) queryVotes(ctx context.Context, query string, arg interface{}) ([]*Vote, error) {
 	rows, err := r.pool.Query(ctx, query, arg)
@@ -446,4 +479,25 @@ func (r *PostgresRepository) DeletePeer(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// NewRepository creates a new repository instance based on configuration
+func NewRepository(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.Logger) (Repository, error) {
+	pool, err := pgxpool.Connect(ctx, cfg.URL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	repo := &PostgresRepository{
+		pool:   pool,
+		logger: logger,
+	}
+
+	// Test connection
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return repo, nil
 }

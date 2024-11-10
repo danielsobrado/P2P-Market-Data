@@ -3,12 +3,19 @@ package host
 import (
 	"context"
 	"fmt"
+	"p2p_market_data/pkg/data"
 	"sync"
 	"time"
 
-	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap"
 )
+
+// DataRequest represents a data request to a peer
+type DataRequest struct {
+	Type    string
+	Payload []byte
+}
 
 // NetworkManager handles P2P network operations
 const (
@@ -121,4 +128,28 @@ func (nm *NetworkManager) runMetricsCollector() {
 			nm.metrics.Collect(nm.host)
 		}
 	}
+}
+
+// RequestData requests data from a peer
+func (nm *NetworkManager) RequestData(ctx context.Context, peerID string, request data.DataRequest) error {
+	// TODO: Implement network request logic
+	return nil
+}
+
+// ResetConnection resets the network connections
+func (nm *NetworkManager) ResetConnection() error {
+	// TODO: Implement reset logic
+	return nil
+}
+
+// ResetProcessing resets data processing state
+func (nm *NetworkManager) ResetProcessing() error {
+	// TODO: Implement processing reset logic
+	return nil
+}
+
+// RetryConnection attempts to reconnect to peers
+func (nm *NetworkManager) RetryConnection() error {
+	// TODO: Implement retry logic
+	return nil
 }

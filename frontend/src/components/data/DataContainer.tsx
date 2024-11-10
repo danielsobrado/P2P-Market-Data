@@ -1,4 +1,4 @@
-import { Suspense } from 'react'
+import { SetStateAction, Suspense, useState, useCallback } from 'react'
 import DataManagementComponent from './DataManagement'
 import { DataErrorBoundary } from '@/components/data/DataErrorBoundary'
 import { DataSourceSkeleton, TransferSkeleton } from '@/components/data/skeletons/DataSkeletons'
@@ -6,21 +6,55 @@ import { useDataManagement } from '@/hooks/useDataManagement'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { AlertCircle, RefreshCw } from 'lucide-react'
+import { DataSource, MarketDataBase, DataTransfer, DataRequest } from './interfaces/MarketDataBase'
 
-// Integration component that handles loading, errors, and data management
-export function DataContainer() {
+export const DataContainer: React.FC = () => {
+  
+  const [marketData, setMarketData] = useState<MarketDataBase[]>([])
+  const [sources, setSources] = useState<DataSource[]>([])
+  const [transfers, setTransfers] = useState<DataTransfer[]>([])
+  const [searchResults, setSearchResults] = useState<DataSource[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [isPolling, setIsPolling] = useState(false)
+
+  const updateTransfers = useCallback(async () => {
+    try {
+      const activeTransfers = await window.go.main.App.GetActiveTransfers()
+      setTransfers(activeTransfers.map((transfer: any): DataTransfer => ({
+        id: transfer.id,
+        type: transfer.type,
+        symbol: transfer.symbol,
+        source: transfer.source,
+        destination: transfer.destination,
+        progress: transfer.progress,
+        status: transfer.status,
+        startTime: transfer.startTime,
+        endTime: transfer.endTime,
+        size: transfer.size,
+        speed: transfer.speed
+      })))
+    } catch (error) {
+      console.error('Failed to fetch transfers:', error)
+    }
+  }, [])
+
+  const updateMarketData = useCallback((newData: SetStateAction<MarketDataBase[]>) => {
+    setMarketData(newData)
+
+    // The selected code with types:
+    const resolvedData = typeof newData === 'function' ? newData(marketData) : newData;
+    window.go.main.App.UpdateMarketData(resolvedData).catch((error: Error) => {
+      console.error('Failed to update market data:', error);
+    });
+  }, [marketData])
+
   const {
-    isLoading,
     error,
-    sources,
-    transfers,
-    searchResults,
     fetchDataSources,
     fetchActiveTransfers,
     searchData,
     requestData,
     clearSearchResults,
-    setPollingEnabled,
   } = useDataManagement()
 
   if (error) {
@@ -62,6 +96,8 @@ export function DataContainer() {
         }
       >
         <DataManagementComponent
+          data={marketData}
+          setData={updateMarketData}
           sources={sources}
           transfers={transfers}
           searchResults={searchResults}
@@ -69,24 +105,9 @@ export function DataContainer() {
           onRequestData={requestData}
           onClearSearch={clearSearchResults}
           isLoading={isLoading}
-          setPollingEnabled={setPollingEnabled}
+          setPollingEnabled={setIsPolling}
         />
       </Suspense>
     </DataErrorBoundary>
   )
-}
-
-export interface DataSource {
-  id: string;
-  name: string;
-}
-
-export interface DataTransfer {
-  id: string;
-  name: string;
-}
-
-export interface DataRequest {
-  // Add necessary fields based on your requirements
-  query: string;
 }

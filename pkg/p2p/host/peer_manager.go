@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
-	libp2pHost "github.com/libp2p/go-libp2p-core/host"
-	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
-	libp2pDiscovery "github.com/libp2p/go-libp2p-discovery"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	libp2pDiscovery "github.com/libp2p/go-libp2p/p2p/discovery/routing"
+	libp2pHost "github.com/libp2p/go-libp2p/core/host"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"go.uber.org/zap"
 )

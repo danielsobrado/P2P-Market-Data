@@ -1,70 +1,70 @@
 package host
 
 import (
-    "bufio"
-    "encoding/json"
-    
-    libp2pNetwork "github.com/libp2p/go-libp2p-core/network"
-    libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
-    libp2pMultiaddr "github.com/multiformats/go-multiaddr"
-    "go.uber.org/zap"
+	"bufio"
+	"encoding/json"
+
+	libp2pNetwork "github.com/libp2p/go-libp2p/core/network"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
+	libp2pMultiaddr "github.com/multiformats/go-multiaddr"
+	"go.uber.org/zap"
 )
 
 // PeerDiscoveryRequest represents a peer discovery request
 type PeerDiscoveryRequest struct {
-    // Define fields if needed
+	// Define fields if needed
 }
 
 // PeerDiscoveryResponse represents a peer discovery response
 type PeerDiscoveryResponse struct {
-    PeerID libp2pPeer.ID
-    Addrs  []libp2pMultiaddr.Multiaddr
+	PeerID libp2pPeer.ID
+	Addrs  []libp2pMultiaddr.Multiaddr
 }
 
 // handleDiscoveryStream handles peer discovery protocol streams
 func (h *Host) handleDiscoveryStream(stream libp2pNetwork.Stream) {
-    defer stream.Close()
-    
-    peerID := stream.Conn().RemotePeer()
-    h.logger.Debug("Received discovery stream",
-        zap.String("protocol", string(stream.Protocol())),
-        zap.String("peer", peerID.String()))
+	defer stream.Close()
 
-    // Read discovery request
-    var req PeerDiscoveryRequest
-    if err := json.NewDecoder(bufio.NewReader(stream)).Decode(&req); err != nil {
-        h.logger.Error("Failed to decode discovery request", zap.Error(err))
-        return
-    }
+	peerID := stream.Conn().RemotePeer()
+	h.logger.Debug("Received discovery stream",
+		zap.String("protocol", string(stream.Protocol())),
+		zap.String("peer", peerID.String()))
 
-    // Respond with peer info
-    resp := PeerDiscoveryResponse{
-        PeerID: h.host.ID(),
-        Addrs:  h.host.Addrs(),
-    }
+	// Read discovery request
+	var req PeerDiscoveryRequest
+	if err := json.NewDecoder(bufio.NewReader(stream)).Decode(&req); err != nil {
+		h.logger.Error("Failed to decode discovery request", zap.Error(err))
+		return
+	}
 
-    writer := bufio.NewWriter(stream)
-    if err := json.NewEncoder(writer).Encode(resp); err != nil {
-        h.logger.Error("Failed to encode discovery response", zap.Error(err))
-        return
-    }
-    
-    if err := writer.Flush(); err != nil {
-        h.logger.Error("Failed to flush discovery response", zap.Error(err))
-        return
-    }
+	// Respond with peer info
+	resp := PeerDiscoveryResponse{
+		PeerID: h.host.ID(),
+		Addrs:  h.host.Addrs(),
+	}
 
-    h.logger.Debug("Sent discovery response", zap.String("peer", peerID.String()))
+	writer := bufio.NewWriter(stream)
+	if err := json.NewEncoder(writer).Encode(resp); err != nil {
+		h.logger.Error("Failed to encode discovery response", zap.Error(err))
+		return
+	}
+
+	if err := writer.Flush(); err != nil {
+		h.logger.Error("Failed to flush discovery response", zap.Error(err))
+		return
+	}
+
+	h.logger.Debug("Sent discovery response", zap.String("peer", peerID.String()))
 }
 
 // handleValidationStream handles validation protocol streams
 func (h *Host) handleValidationStream(stream libp2pNetwork.Stream) {
-    defer stream.Close()
-    // Implement validation stream handling logic
+	defer stream.Close()
+	// Implement validation stream handling logic
 }
 
 // handleStream handles generic protocol streams
 func (h *Host) handleStream(stream libp2pNetwork.Stream) {
-    defer stream.Close()
-    // Implement stream handling logic
+	defer stream.Close()
+	// Implement stream handling logic
 }

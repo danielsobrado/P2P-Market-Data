@@ -34,8 +34,8 @@ type ScriptMetadata struct {
 
 // ScriptManager handles script storage and management
 type ScriptManager struct {
-	config   *config.ScriptConfig
-	executor *ScriptExecutor
+	Config   *config.ScriptConfig
+	Executor *ScriptExecutor
 	logger   *zap.Logger
 	scripts  map[string]*ScriptMetadata
 	mu       sync.RWMutex
@@ -49,8 +49,8 @@ func NewScriptManager(config *config.ScriptConfig, logger *zap.Logger) (*ScriptM
 	}
 
 	manager := &ScriptManager{
-		config:   config,
-		executor: executor,
+		Config:   config,
+		Executor: executor,
 		logger:   logger,
 		scripts:  make(map[string]*ScriptMetadata),
 	}
@@ -77,8 +77,8 @@ func (m *ScriptManager) Stop() error {
 
 	// If there are background processes or resources to clean up, handle them here.
 	// Example:
-	// if m.executor != nil {
-	//     if err := m.executor.Shutdown(); err != nil {
+	// if m.Executor != nil {
+	//     if err := m.Executor.Shutdown(); err != nil {
 	//         m.logger.Error("Error shutting down executor", zap.Error(err))
 	//         return err
 	//     }
@@ -93,7 +93,7 @@ func (m *ScriptManager) AddScript(name string, content []byte, metadata *ScriptM
 	defer m.mu.Unlock()
 
 	// Validate script content
-	if err := m.executor.validateScript(name); err != nil {
+	if err := m.Executor.validateScript(name); err != nil {
 		return fmt.Errorf("invalid script: %w", err)
 	}
 
@@ -107,7 +107,7 @@ func (m *ScriptManager) AddScript(name string, content []byte, metadata *ScriptM
 	}
 
 	// Create script file
-	scriptPath := filepath.Join(m.config.ScriptDir, name)
+	scriptPath := filepath.Join(m.Config.ScriptDir, name)
 	if err := os.WriteFile(scriptPath, content, 0644); err != nil {
 		return fmt.Errorf("writing script file: %w", err)
 	}
@@ -153,7 +153,7 @@ func (m *ScriptManager) UpdateScript(scriptID string, content []byte) error {
 	}
 
 	// Validate new content
-	if err := m.executor.validateScript(script.Name); err != nil {
+	if err := m.Executor.validateScript(script.Name); err != nil {
 		return fmt.Errorf("invalid script content: %w", err)
 	}
 
@@ -162,7 +162,7 @@ func (m *ScriptManager) UpdateScript(scriptID string, content []byte) error {
 	newHash := hex.EncodeToString(hash[:])
 
 	// Update script file
-	scriptPath := filepath.Join(m.config.ScriptDir, script.Name)
+	scriptPath := filepath.Join(m.Config.ScriptDir, script.Name)
 	if err := os.WriteFile(scriptPath, content, 0644); err != nil {
 		return fmt.Errorf("writing updated script: %w", err)
 	}
@@ -191,7 +191,7 @@ func (m *ScriptManager) DeleteScript(scriptID string) error {
 	}
 
 	// Remove script file
-	scriptPath := filepath.Join(m.config.ScriptDir, script.Name)
+	scriptPath := filepath.Join(m.Config.ScriptDir, script.Name)
 	if err := os.Remove(scriptPath); err != nil {
 		return fmt.Errorf("removing script file: %w", err)
 	}
@@ -228,15 +228,22 @@ func (m *ScriptManager) ExecuteScript(ctx context.Context, scriptID string, args
 		return nil, fmt.Errorf("script not found: %s", scriptID)
 	}
 
-	scriptPath := filepath.Join(m.config.ScriptDir, script.Name)
-	return m.executor.ExecuteScript(ctx, scriptPath, args)
+	scriptPath := filepath.Join(m.Config.ScriptDir, script.Name)
+	return m.Executor.ExecuteScript(ctx, scriptPath, args)
+}
+
+// Add this method to ScriptManager struct
+func (m *ScriptManager) GetConfig() *config.ScriptConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.Config
 }
 
 // Private methods
 
 func (m *ScriptManager) initializeScriptDirectory() error {
 	// Create script directory if it doesn't exist
-	if err := os.MkdirAll(m.config.ScriptDir, 0755); err != nil {
+	if err := os.MkdirAll(m.Config.ScriptDir, 0755); err != nil {
 		return fmt.Errorf("creating script directory: %w", err)
 	}
 
@@ -244,7 +251,7 @@ func (m *ScriptManager) initializeScriptDirectory() error {
 }
 
 func (m *ScriptManager) loadScripts() error {
-	return filepath.Walk(m.config.ScriptDir, func(path string, info fs.FileInfo, err error) error {
+	return filepath.Walk(m.Config.ScriptDir, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -289,7 +296,7 @@ func (m *ScriptManager) ValidateDependencies(scriptID string) error {
 	for _, dep := range script.Dependencies {
 		// Create temporary script to test import
 		testScript := fmt.Sprintf("import %s", dep)
-		tmpFile := filepath.Join(m.config.ScriptDir, "_test_import.py")
+		tmpFile := filepath.Join(m.Config.ScriptDir, "_test_import.py")
 
 		if err := os.WriteFile(tmpFile, []byte(testScript), 0644); err != nil {
 			return fmt.Errorf("creating test script: %w", err)
@@ -300,7 +307,7 @@ func (m *ScriptManager) ValidateDependencies(scriptID string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		if _, err := m.executor.ExecuteScript(ctx, tmpFile, nil); err != nil {
+		if _, err := m.Executor.ExecuteScript(ctx, tmpFile, nil); err != nil {
 			return fmt.Errorf("dependency not available: %s", dep)
 		}
 	}
@@ -318,8 +325,8 @@ func (m *ScriptManager) BackupScript(scriptID string) error {
 		return fmt.Errorf("script not found: %s", scriptID)
 	}
 
-	sourcePath := filepath.Join(m.config.ScriptDir, script.Name)
-	backupPath := filepath.Join(m.config.ScriptDir, "backups",
+	sourcePath := filepath.Join(m.Config.ScriptDir, script.Name)
+	backupPath := filepath.Join(m.Config.ScriptDir, "backups",
 		fmt.Sprintf("%s_%s.py", script.ID, time.Now().Format("20060102_150405")))
 
 	if err := os.MkdirAll(filepath.Dir(backupPath), 0755); err != nil {
@@ -359,7 +366,7 @@ func (m *ScriptManager) VerifyScriptIntegrity(scriptID string) (bool, error) {
 		return false, fmt.Errorf("script not found: %s", scriptID)
 	}
 
-	scriptPath := filepath.Join(m.config.ScriptDir, script.Name)
+	scriptPath := filepath.Join(m.Config.ScriptDir, script.Name)
 	content, err := os.ReadFile(scriptPath)
 	if err != nil {
 		return false, fmt.Errorf("reading script file: %w", err)
@@ -381,7 +388,7 @@ func (m *ScriptManager) GetScriptHistory(scriptID string) ([]ScriptHistoryEntry,
 		return nil, fmt.Errorf("script not found: %s", scriptID)
 	}
 
-	backupDir := filepath.Join(m.config.ScriptDir, "backups")
+	backupDir := filepath.Join(m.Config.ScriptDir, "backups")
 	pattern := fmt.Sprintf("%s_*.py", script.ID)
 
 	matches, err := filepath.Glob(filepath.Join(backupDir, pattern))

@@ -1,7 +1,9 @@
 // interfaces/DataManagementProps.ts
-import type { DataSource, DataTransfer, DataRequest } from '@/types/marketData'
+import { DataSource, DataTransfer, DataRequest, MarketDataBase } from "./MarketDataBase";
 
 export interface DataManagementProps {
+  data: MarketDataBase[];
+  setData: React.Dispatch<React.SetStateAction<MarketDataBase[]>>;
   sources: DataSource[];
   transfers: DataTransfer[];
   searchResults: DataSource[];
@@ -9,6 +11,6 @@ export interface DataManagementProps {
   onRequestData: (peerId: string, request: DataRequest) => Promise<void>;
   onClearSearch: () => void;
   isLoading: boolean;
-  setPollingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  setPollingEnabled: (enabled: boolean) => void;
   onError?: (error: Error) => void;
 }

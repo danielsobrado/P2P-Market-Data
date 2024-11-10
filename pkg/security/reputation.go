@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap"
 
 	"p2p_market_data/pkg/data"

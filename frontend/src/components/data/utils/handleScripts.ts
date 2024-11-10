@@ -1,6 +1,7 @@
 // utils/handleScripts.ts
 import type { MarketDataType } from '@/types/marketData'
 import type { ScriptInfo } from '../interfaces/ScriptInfo'
+import { MarketDataBase } from '../interfaces/MarketDataBase'
 
 interface ScriptUploadData {
   name: string
@@ -11,6 +12,18 @@ interface ScriptUploadData {
 interface HandleScriptsProps {
   setScripts: React.Dispatch<React.SetStateAction<ScriptInfo[]>>
   onError?: (error: Error) => void
+}
+
+interface App {
+  UpdateMarketData: (data: MarketDataBase[]) => Promise<void>
+  GetActiveTransfers: () => Promise<DataTransfer[]>
+  GetScriptContent: (scriptId: string) => Promise<string>
+  UploadScript: (scriptData: ScriptUploadData) => Promise<void>
+  RunScript: (scriptId: string) => Promise<void>
+  StopScript: (scriptId: string) => Promise<void>
+  DeleteScript: (scriptId: string) => Promise<void>
+  InstallScript: (scriptId: string) => Promise<void>
+  UninstallScript: (scriptId: string) => Promise<void>
 }
 
 export const handleScripts = ({ setScripts, onError }: HandleScriptsProps) => {

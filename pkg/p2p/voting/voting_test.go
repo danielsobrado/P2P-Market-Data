@@ -95,6 +95,31 @@ func (m *MockRepository) UpdateStake(ctx context.Context, stake *data.Stake) err
 	return nil
 }
 
+// Dividend operations
+func (m *MockRepository) GetDividendData(ctx context.Context, id string, param1 string, param2 string) ([]data.DividendData, error) {
+	return nil, nil
+}
+
+// EOD operations
+func (m *MockRepository) GetEODData(ctx context.Context, symbol string, startDate string, endDate string) ([]data.EODData, error) {
+	return nil, nil
+}
+
+// Data source operations
+func (m *MockRepository) GetDataSources(ctx context.Context) ([]data.DataSource, error) {
+	return nil, nil
+}
+
+// Insider Data operations
+func (m *MockRepository) GetInsiderData(ctx context.Context, symbol string, startDate string, endDate string) ([]data.InsiderTrade, error) {
+	return nil, nil
+}
+
+// SearchData operation
+func (m *MockRepository) SearchData(ctx context.Context, request data.DataRequest) ([]data.DataSource, error) {
+	return nil, nil
+}
+
 // TopicStub implements the Topic interface for testing purposes
 type TopicStub struct {
 	mu       sync.Mutex

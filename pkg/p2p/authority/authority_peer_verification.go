@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap"
 )
 

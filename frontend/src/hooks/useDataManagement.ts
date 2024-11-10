@@ -65,7 +65,7 @@ export function useDataManagement() {
   const fetchActiveTransfers = useCallback(async () => {
     try {
       const transfers = await window.go.main.App.GetActiveTransfers()
-      dispatch({ type: 'UPDATE_TRANSFERS', payload: transfers })
+      dispatch({ type: 'UPDATE_TRANSFERS', payload: (transfers as unknown) as DataTransfer[] })
     } catch (error) {
       console.error('Error fetching transfers:', error)
     }

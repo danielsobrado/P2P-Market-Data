@@ -3,15 +3,28 @@ export type MarketDataType = 'EOD' | 'DIVIDEND' | 'INSIDER_TRADE'
 export type TimeGranularity = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'
 
 export interface DataRequest {
-  type: MarketDataType
+  type: string
   symbol: string
   startDate: string
   endDate: string
   granularity: TimeGranularity
 }
 
-export interface EODData {
+// First create the base interface
+export interface BaseMarketData {
+  id: string
   symbol: string
+  source: string
+  dataType: string
+  timestamp: string
+  upVotes: number
+  downVotes: number
+  validationScore: number
+  validatedBy: string[]
+}
+
+// Update specific data types to extend base
+export interface EODData extends BaseMarketData {
   date: string
   open: number
   high: number
@@ -21,19 +34,15 @@ export interface EODData {
   adjustedClose: number
 }
 
-export interface DividendData {
+export interface DividendData extends BaseMarketData {
   stockPrice: number
-  symbol: string
   date: string
   amount: number
   type: string
   currency: string
 }
 
-export interface InsiderTrade {
-  price: any
-  amount: any
-  symbol: string
+export interface InsiderTrade extends BaseMarketData {
   date: string
   insiderName: string
   position: string
@@ -70,3 +79,4 @@ export interface DataTransfer {
   size: number
   speed: number
 }
+

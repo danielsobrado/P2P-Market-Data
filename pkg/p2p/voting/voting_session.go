@@ -7,7 +7,7 @@ import (
 
 	"p2p_market_data/pkg/data"
 
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // VotingSession represents an active voting session

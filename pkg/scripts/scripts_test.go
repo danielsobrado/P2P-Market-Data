@@ -355,8 +355,8 @@ print(f"Processed input: {data['value'] * 2}")
 		require.NoError(t, err)
 
 		input := map[string]int{"value": 21}
-		result, err := manager.executor.ExecuteScriptWithInput(context.Background(),
-			filepath.Join(manager.config.ScriptDir, metadata.Name), input)
+		result, err := manager.Executor.ExecuteScriptWithInput(context.Background(),
+			filepath.Join(manager.Config.ScriptDir, metadata.Name), input)
 
 		require.NoError(t, err)
 		assert.Contains(t, result.Output, "Processed input: 42")
@@ -380,8 +380,8 @@ print(json.dumps(result))
 			Message    string `json:"message"`
 		}
 
-		result, err := manager.executor.ExecuteScriptWithOutputCapture(context.Background(),
-			filepath.Join(manager.config.ScriptDir, metadata.Name), &output)
+		result, err := manager.Executor.ExecuteScriptWithOutputCapture(context.Background(),
+			filepath.Join(manager.Config.ScriptDir, metadata.Name), &output)
 
 		require.NoError(t, err)
 		assert.Equal(t, 42, output.Calculated)
@@ -408,7 +408,7 @@ func TestScriptMetrics(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		stats := manager.executor.GetExecutorStats()
+		stats := manager.Executor.GetExecutorStats()
 		assert.Equal(t, int64(3), stats.ExecutionsTotal)
 		assert.Equal(t, int64(0), stats.ExecutionsFailed)
 		assert.Greater(t, stats.AverageMemoryUsage, int64(0))

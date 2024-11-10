@@ -8,7 +8,7 @@ import (
 	"p2p_market_data/pkg/p2p/message"
 	"p2p_market_data/pkg/security"
 
-	libp2pPeer "github.com/libp2p/go-libp2p-core/peer"
+	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap"
 )
 

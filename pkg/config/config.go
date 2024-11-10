@@ -24,6 +24,7 @@ type Config struct {
 
 // DatabaseConfig holds database connection settings
 type DatabaseConfig struct {
+	Type     string        `mapstructure:"type"` // e.g. "postgres", "sqlite"
 	URL      string        `mapstructure:"url"`
 	MaxConns int           `mapstructure:"max_conns"`
 	Timeout  time.Duration `mapstructure:"timeout"`
@@ -65,6 +66,7 @@ type SchedConfig struct {
 type SecurityConfig struct {
 	MinReputationScore float64       `mapstructure:"min_reputation_score"`
 	MaxPenalty         float64       `mapstructure:"max_penalty"`
+	MinConfidence      float64       `json:"min_confidence"`
 	KeyFile            string        `mapstructure:"key_file"`
 	AuthorityNodes     []string      `mapstructure:"authority_nodes"`
 	TokenExpiry        time.Duration `mapstructure:"token_expiry"`
@@ -142,6 +144,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("security.token_expiry", "24h")
 
 	// Database defaults
+	v.SetDefault("database.type", "postgres")
 	v.SetDefault("database.max_conns", 10)
 	v.SetDefault("database.timeout", "30s")
 	v.SetDefault("database.ssl_mode", "disable")
@@ -178,6 +181,17 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateDatabase() error {
+	if c.Database.Type == "" {
+		return fmt.Errorf("database type cannot be empty")
+	}
+
+	switch c.Database.Type {
+	case "postgres", "sqlite":
+		// Valid types
+	default:
+		return fmt.Errorf("unsupported database type: %s", c.Database.Type)
+	}
+
 	if c.Database.URL == "" {
 		return fmt.Errorf("database URL cannot be empty")
 	}

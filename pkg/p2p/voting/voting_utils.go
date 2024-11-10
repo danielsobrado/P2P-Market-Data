@@ -8,7 +8,7 @@ import (
 
 	"p2p_market_data/pkg/data"
 
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // BatchVoting handles multiple voting sessions in parallel

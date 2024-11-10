@@ -18,7 +18,7 @@ const (
 )
 
 // handleTopicMessages processes incoming messages from a topic
-func (h *Host) handleTopicMessages(ctx context.Context, topicName string, sub *pubsub.Subscription) {
+func (h *Host) processTopicMessages(ctx context.Context, topicName string, sub *pubsub.Subscription) {
 	for {
 		msg, err := sub.Next(ctx)
 		if err != nil {
@@ -30,12 +30,12 @@ func (h *Host) handleTopicMessages(ctx context.Context, topicName string, sub *p
 		}
 
 		// Process the message
-		h.processIncomingMessage(msg)
+		h.processTopicMessage(msg)
 	}
 }
 
-// processIncomingMessage deserializes and handles an incoming message
-func (h *Host) processIncomingMessage(msg *pubsub.Message) {
+// processTopicMessage deserializes and handles an incoming message from topics
+func (h *Host) processTopicMessage(msg *pubsub.Message) {
 	// Deserialize the message
 	receivedMsg := &message.Message{}
 	if err := receivedMsg.Unmarshal(msg.Data); err != nil {
@@ -52,7 +52,7 @@ func (h *Host) processIncomingMessage(msg *pubsub.Message) {
 	// Handle the message based on its type
 	switch receivedMsg.Type {
 	case message.MarketDataMessage:
-		h.handleMarketDataMessage(receivedMsg)
+		h.processMarketDataMessage(receivedMsg)
 		h.metrics.IncrementMessagesProcessed()
 	case message.ValidationRequestMessage:
 		h.handleValidationRequestMessage(receivedMsg)
@@ -63,8 +63,8 @@ func (h *Host) processIncomingMessage(msg *pubsub.Message) {
 	}
 }
 
-// handleMarketDataMessage handles incoming market data messages
-func (h *Host) handleMarketDataMessage(msg *message.Message) {
+// processMarketDataMessage handles incoming market data messages
+func (h *Host) processMarketDataMessage(msg *message.Message) {
 	marketData, ok := msg.Data.(*data.MarketData)
 	if !ok {
 		h.logger.Warn("Invalid market data message payload")
@@ -78,12 +78,4 @@ func (h *Host) handleMarketDataMessage(msg *message.Message) {
 	// Optionally store or process the market data
 }
 
-// handleValidationRequestMessage handles incoming validation requests
-func (h *Host) handleValidationRequestMessage(msg *message.Message) {
-	// Implement handling of validation requests
-}
 
-// handleValidationResponseMessage handles incoming validation responses
-func (h *Host) handleValidationResponseMessage(msg *message.Message) {
-	// Implement handling of validation responses
-}
