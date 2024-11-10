@@ -32,9 +32,9 @@ func main() {
 	err := wails.Run(&options.App{
 		Title:             "P2P Stock Market Data",
 		Width:             1024,
-		Height:            1024,
+		Height:            930,
 		MinWidth:          1024,
-		MinHeight:         900,
+		MinHeight:         930,
 		MaxWidth:          1280,
 		MaxHeight:         1024,
 		DisableResize:     false,
