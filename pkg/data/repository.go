@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -51,10 +52,13 @@ type Repository interface {
 
 	// Data retrieval methods
 	GetEODData(ctx context.Context, symbol, startDate, endDate string) ([]EODData, error)
-	GetDividendData(ctx context.Context, symbol, startDate, endDate string) ([]DividendData, error)
 	GetInsiderData(ctx context.Context, symbol, startDate, endDate string) ([]InsiderTrade, error)
 	GetDataSources(ctx context.Context) ([]DataSource, error)
 	SearchData(ctx context.Context, request DataRequest) ([]DataSource, error)
+
+	// Dividend Data operations
+	SaveDividendData(ctx context.Context, dividend *DividendData) error
+	GetDividendData(ctx context.Context, symbol string, startDate, endDate time.Time) ([]*DividendData, error)
 }
 
 // MarketDataFilter defines filter parameters for market data queries
@@ -137,19 +141,79 @@ func (r *PostgresRepository) SavePeer(ctx context.Context, peer *Peer) error {
 	return nil
 }
 
-// SaveStake implements Repository.
+// SaveStake saves a new stake to the database
 func (r *PostgresRepository) SaveStake(ctx context.Context, stake *Stake) error {
-	panic("unimplemented")
+    query := `
+        INSERT INTO stakes (id, peer_id, amount, created_at, expires_at, status)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (id) DO NOTHING
+    `
+
+    _, err := r.pool.Exec(ctx, query,
+        stake.ID,
+        stake.PeerID,
+        stake.Amount,
+        stake.CreatedAt,
+        stake.ExpiresAt,
+        stake.Status,
+    )
+    if err != nil {
+        return fmt.Errorf("saving stake: %w", err)
+    }
+    return nil
 }
 
-// UpdatePeer implements Repository.
+// UpdatePeer updates an existing peer in the database
 func (r *PostgresRepository) UpdatePeer(ctx context.Context, peer *Peer) error {
-	panic("unimplemented")
+    query := `
+        UPDATE peers SET
+            address = $2,
+            reputation = $3,
+            last_seen = $4,
+            roles = $5,
+            metadata = $6
+        WHERE id = $1
+    `
+
+    metadataJSON, err := json.Marshal(peer.Metadata)
+    if err != nil {
+        return fmt.Errorf("marshaling metadata: %w", err)
+    }
+
+    _, err = r.pool.Exec(ctx, query,
+        peer.ID,
+        peer.Address,
+        peer.Reputation,
+        peer.LastSeen,
+        peer.Roles,
+        metadataJSON,
+    )
+    if err != nil {
+        return fmt.Errorf("updating peer: %w", err)
+    }
+    return nil
 }
 
-// UpdateStake implements Repository.
+// UpdateStake updates an existing stake in the database
 func (r *PostgresRepository) UpdateStake(ctx context.Context, stake *Stake) error {
-	panic("unimplemented")
+    query := `
+        UPDATE stakes SET
+            amount = $2,
+            expires_at = $3,
+            status = $4
+        WHERE id = $1
+    `
+
+    _, err := r.pool.Exec(ctx, query,
+        stake.ID,
+        stake.Amount,
+        stake.ExpiresAt,
+        stake.Status,
+    )
+    if err != nil {
+        return fmt.Errorf("updating stake: %w", err)
+    }
+    return nil
 }
 
 // NewPostgresRepository creates a new PostgreSQL repository instance
@@ -454,9 +518,55 @@ func (r *PostgresRepository) ListStakesByPeer(ctx context.Context, peerID string
 }
 
 // GetDividendData retrieves dividend data based on symbol and date range
-func (r *PostgresRepository) GetDividendData(ctx context.Context, symbol, startDate, endDate string) ([]DividendData, error) {
-	// TODO: Implement actual database query
-	return nil, nil
+func (r *PostgresRepository) GetDividendData(ctx context.Context, symbol string, startDate, endDate time.Time) ([]*DividendData, error) {
+	query := `
+        SELECT id, symbol, ex_date, payment_date, record_date, declared_date, amount, source,
+               currency, frequency, metadata, created_at, updated_at
+        FROM dividends
+        WHERE symbol = $1 AND ex_date BETWEEN $2 AND $3
+        ORDER BY ex_date ASC
+    `
+
+	rows, err := r.pool.Query(ctx, query, symbol, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("querying dividend data: %w", err)
+	}
+	defer rows.Close()
+
+	var dividends []*DividendData
+	for rows.Next() {
+		var dividend DividendData
+		var metadataJSON []byte
+
+		err := rows.Scan(
+			&dividend.ID,
+			&dividend.Symbol,
+			&dividend.ExDate,
+			&dividend.PaymentDate,
+			&dividend.RecordDate,
+			&dividend.DeclaredDate,
+			&dividend.Amount,
+			&dividend.Source,
+			&dividend.Currency,
+			&dividend.Frequency,
+			&metadataJSON,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scanning dividend data: %w", err)
+		}
+
+		if err := json.Unmarshal(metadataJSON, &dividend.Metadata); err != nil {
+			return nil, fmt.Errorf("unmarshaling metadata: %w", err)
+		}
+
+		dividends = append(dividends, &dividend)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return dividends, nil
 }
 
 // SearchData implements the Repository interface for searching data sources
@@ -540,4 +650,51 @@ func NewRepository(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.
 	}
 
 	return repo, nil
+}
+
+// SaveDividendData saves dividend data to the database
+func (r *PostgresRepository) SaveDividendData(ctx context.Context, dividend *DividendData) error {
+	query := `
+        INSERT INTO dividends (
+            id, symbol, ex_date, payment_date, record_date, declared_date, amount, source,
+            currency, frequency, metadata, created_at, updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, NOW(), NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            ex_date = EXCLUDED.ex_date,
+            payment_date = EXCLUDED.payment_date,
+            record_date = EXCLUDED.record_date,
+            declared_date = EXCLUDED.declared_date,
+            amount = EXCLUDED.amount,
+            source = EXCLUDED.source,
+            currency = EXCLUDED.currency,
+            frequency = EXCLUDED.frequency,
+            metadata = EXCLUDED.metadata,
+            updated_at = NOW()
+    `
+
+	metadataJSON, err := json.Marshal(dividend.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshaling metadata: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query,
+		dividend.ID,
+		dividend.Symbol,
+		dividend.ExDate,
+		dividend.PaymentDate,
+		dividend.RecordDate,
+		dividend.DeclaredDate,
+		dividend.Amount,
+		dividend.Source,
+		dividend.Currency,
+		dividend.Frequency,
+		metadataJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("saving dividend data: %w", err)
+	}
+	return nil
 }

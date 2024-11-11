@@ -101,12 +101,15 @@ export namespace data {
 	    down_votes: number;
 	    metadata: {[key: string]: string};
 	    amount: number;
+	    currency: string;
 	    // Go type: time
 	    ex_date: any;
 	    // Go type: time
 	    pay_date: any;
 	    // Go type: time
 	    record_date: any;
+	    // Go type: time
+	    payment_date: any;
 	    // Go type: time
 	    declaration_date: any;
 	    frequency: string;
@@ -128,9 +131,11 @@ export namespace data {
 	        this.down_votes = source["down_votes"];
 	        this.metadata = source["metadata"];
 	        this.amount = source["amount"];
+	        this.currency = source["currency"];
 	        this.ex_date = this.convertValues(source["ex_date"], null);
 	        this.pay_date = this.convertValues(source["pay_date"], null);
 	        this.record_date = this.convertValues(source["record_date"], null);
+	        this.payment_date = this.convertValues(source["payment_date"], null);
 	        this.declaration_date = this.convertValues(source["declaration_date"], null);
 	        this.frequency = source["frequency"];
 	        this.type = source["type"];

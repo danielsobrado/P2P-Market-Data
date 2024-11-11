@@ -368,13 +368,15 @@ type EODData struct {
 
 type DividendData struct {
 	MarketDataBase
-	Amount          float64   `json:"amount"`
-	ExDate          time.Time `json:"ex_date"`
-	PayDate         time.Time `json:"pay_date"`
-	RecordDate      time.Time `json:"record_date"`
-	DeclarationDate time.Time `json:"declaration_date"`
-	Frequency       string    `json:"frequency"`
-	Type            string    `json:"type"`
+	Amount       float64   `json:"amount"`
+	Currency     string    `json:"currency"`
+	ExDate       time.Time `json:"ex_date"`
+	PayDate      time.Time `json:"pay_date"`
+	RecordDate   time.Time `json:"record_date"`
+	PaymentDate  time.Time `json:"payment_date"`
+	DeclaredDate time.Time `json:"declaration_date"`
+	Frequency    string    `json:"frequency"`
+	Type         string    `json:"type"`
 }
 
 type InsiderTrade struct {

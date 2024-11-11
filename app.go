@@ -469,7 +469,25 @@ func (a *App) GetEODData(symbol, startDate, endDate string) ([]data.EODData, err
 }
 
 func (a *App) GetDividendData(symbol, startDate, endDate string) ([]data.DividendData, error) {
-	return a.repository.GetDividendData(a.ctx, symbol, startDate, endDate)
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start date format: %w", err)
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end date format: %w", err)
+	}
+
+	ptrData, err := a.repository.GetDividendData(a.ctx, symbol, start, end)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]data.DividendData, len(ptrData))
+	for i, d := range ptrData {
+		result[i] = *d
+	}
+	return result, nil
 }
 
 func (a *App) GetInsiderData(symbol, startDate, endDate string) ([]data.InsiderTrade, error) {
@@ -630,16 +648,129 @@ func parseDate(s string) time.Time {
 
 // App struct method
 func (a *App) UploadFileData(ctx context.Context, formData map[string]interface{}) error {
-	file := formData["file"]
+	// Extract file, source, and dataType from formData
+	fileHeader := formData["file"].(*multipart.FileHeader)
 	source := formData["source"].(string)
 	dataType := formData["type"].(string)
 
-	// Handle file upload logic here
-	// Parse the file and store data in your database
-	// print the file name, source and dataType
-	fmt.Println(file)
-	fmt.Println(source)
-	fmt.Println(dataType)
+	// Open the uploaded file
+	file, err := fileHeader.Open()
+	if err != nil {
+		return fmt.Errorf("opening uploaded file: %w", err)
+	}
+	defer file.Close()
+
+	// Parse the file based on dataType
+	switch dataType {
+	case "eod":
+		if err := a.processEODFile(ctx, file, source); err != nil {
+			return err
+		}
+	case "insider_trades":
+		if err := a.processInsiderTradesFile(ctx, file, source); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported data type: %s", dataType)
+	}
+
+	return nil
+}
+
+// processEODFile parses EOD data from CSV file and stores it in the repository
+func (a *App) processEODFile(ctx context.Context, file io.Reader, source string) error {
+	reader := csv.NewReader(file)
+
+	// Read CSV header
+	header, err := reader.Read()
+	if err != nil {
+		return fmt.Errorf("reading CSV header: %w", err)
+	}
+
+	// Read and process each record
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("reading CSV row: %w", err)
+		}
+
+		// Parse the EOD data
+		eodData := parseEODData(header, row, source)
+
+		// Convert to MarketData
+		marketData := &data.MarketData{
+			ID:        eodData.ID,
+			Symbol:    eodData.Symbol,
+			Source:    eodData.Source,
+			DataType:  eodData.DataType,
+			Timestamp: eodData.Timestamp,
+			MetaData: map[string]string{
+				"open":   fmt.Sprintf("%.4f", eodData.Open),
+				"high":   fmt.Sprintf("%.4f", eodData.High),
+				"low":    fmt.Sprintf("%.4f", eodData.Low),
+				"close":  fmt.Sprintf("%.4f", eodData.Close),
+				"volume": fmt.Sprintf("%.0f", eodData.Volume),
+				"date":   eodData.Date.Format(time.RFC3339),
+			},
+		}
+
+		// Save to repository
+		if err := a.repository.SaveMarketData(ctx, marketData); err != nil {
+			a.logger.Error("Failed to save market data", zap.Error(err))
+		}
+	}
+
+	return nil
+}
+
+// processInsiderTradesFile parses insider trades data and stores it
+func (a *App) processInsiderTradesFile(ctx context.Context, file io.Reader, source string) error {
+	reader := csv.NewReader(file)
+
+	// Read CSV header
+	header, err := reader.Read()
+	if err != nil {
+		return fmt.Errorf("reading CSV header: %w", err)
+	}
+
+	// Read and process each record
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("reading CSV row: %w", err)
+		}
+
+		// Parse the insider trade data
+		tradeData := parseInsiderTradeData(header, row, source)
+
+		// Convert to MarketData and save to repository
+		marketData := &data.MarketData{
+			ID:        tradeData.ID,
+			Symbol:    tradeData.Symbol,
+			Source:    tradeData.Source,
+			DataType:  tradeData.DataType,
+			Timestamp: tradeData.Timestamp,
+			MetaData: map[string]string{
+				"insider_name":     tradeData.InsiderName,
+				"insider_title":    tradeData.InsiderTitle,
+				"position":         tradeData.Position,
+				"shares":           fmt.Sprintf("%d", tradeData.Shares),
+				"price_per_share":  fmt.Sprintf("%.2f", tradeData.PricePerShare),
+				"value":            fmt.Sprintf("%.2f", tradeData.Value),
+				"transaction_type": tradeData.TransactionType,
+				"trade_date":       tradeData.TradeDate.Format(time.RFC3339),
+			},
+		}
+		if err := a.repository.SaveMarketData(ctx, marketData); err != nil {
+			a.logger.Error("Failed to save insider trade data", zap.Error(err))
+		}
+	}
 
 	return nil
 }

@@ -104,8 +104,12 @@ func (m *MockRepository) UpdateStake(ctx context.Context, stake *data.Stake) err
 }
 
 // Dividend operations
-func (m *MockRepository) GetDividendData(ctx context.Context, id string, param1 string, param2 string) ([]data.DividendData, error) {
+func (m *MockRepository) GetDividendData(ctx context.Context, id string, startTime time.Time, endTime time.Time) ([]*data.DividendData, error) {
 	return nil, nil
+}
+
+func (m *MockRepository) SaveDividendData(ctx context.Context, dividend *data.DividendData) error {
+	return nil
 }
 
 // EOD operations

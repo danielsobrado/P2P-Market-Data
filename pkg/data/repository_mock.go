@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"time"
 )
 
 type MockRepository struct{}
@@ -11,6 +12,11 @@ var _ Repository = (*MockRepository)(nil)
 
 func NewMockRepository() Repository {
 	return &MockRepository{}
+}
+
+// SaveDividendData implements Repository.
+func (m *MockRepository) SaveDividendData(ctx context.Context, dividend *DividendData) error {
+	return nil
 }
 
 // Market Data operations
@@ -86,9 +92,8 @@ func (m *MockRepository) CreateStake(ctx context.Context, stake *Stake) error {
 	return nil
 }
 
-// Dividend operations
-func (m *MockRepository) GetDividendData(ctx context.Context, symbol, startDate, endDate string) ([]DividendData, error) {
-	return []DividendData{}, nil
+func (m *MockRepository) GetDividendData(ctx context.Context, symbol string, startDate, endDate time.Time) ([]*DividendData, error) {
+	return []*DividendData{}, nil
 }
 
 // Insider Data operations
