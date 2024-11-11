@@ -22,7 +22,6 @@ import (
 	"p2p_market_data/pkg/config"
 	"p2p_market_data/pkg/data"
 	"p2p_market_data/pkg/p2p/host"
-	p2pHost "p2p_market_data/pkg/p2p/host"
 	"p2p_market_data/pkg/scripts"
 )
 
@@ -117,30 +116,12 @@ func initEmbeddedDB(ctx context.Context, logger *zap.Logger) (*pgx.Conn, error) 
 	return nil, fmt.Errorf("failed to connect to database after retries")
 }
 
-func initSchema(ctx context.Context, conn *pgx.Conn) error {
-	schema := `
-    CREATE TABLE IF NOT EXISTS market_data (
-        id TEXT PRIMARY KEY,
-        symbol TEXT NOT NULL,
-        price DECIMAL NOT NULL,
-        timestamp TIMESTAMP NOT NULL,
-        source TEXT NOT NULL,
-        data_type TEXT NOT NULL,
-        validation_score DECIMAL NOT NULL
-    );
-    -- Add other tables as needed
-    `
-
-	_, err := conn.Exec(ctx, schema)
-	return err
-}
-
 type App struct {
 	ctx           context.Context
 	logger        *zap.Logger
 	scriptManager *scripts.ScriptManager
 	networkMgr    *host.NetworkManager
-	host          *p2pHost.Host
+	host          *host.Host
 	cleanup       []func() error
 	embeddedDB    *postgres.EmbeddedPostgres
 	repository    data.Repository
@@ -195,116 +176,67 @@ func NewApp() *App {
 	logger, _ := zap.NewProduction()
 	ctx := context.Background()
 
-	// Use system temp directory
-	runtimePath := filepath.Join(os.TempDir(), "p2p_market_data_runtime")
-	if err := os.RemoveAll(runtimePath); err != nil {
-		logger.Warn("Failed to clean runtime directory", zap.Error(err))
+	// Create data directories
+	dataDir := "./data"
+	keyDir := filepath.Join(dataDir, "keys")
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		logger.Fatal("Failed to create key directory", zap.Error(err))
 	}
 
-	// Create data directory
-	dbPath := filepath.Join(".", "data", "postgres")
-	if err := os.MkdirAll(dbPath, 0700); err != nil {
-		logger.Fatal("Failed to create database directory", zap.Error(err))
+	// Initialize configuration
+	cfg := &config.Config{
+		P2P: config.P2PConfig{
+			Port:           4001,
+			BootstrapPeers: []string{},
+			MaxPeers:       50,
+			MinPeers:       1,
+		},
+		Security: config.SecurityConfig{
+			KeyFile:       filepath.Join(keyDir, "host.key"),
+			MaxPenalty:    0.5,  // Set to a value between 0 and 1
+			MinConfidence: 0.75, // Set to a value between 0 and 1
+		},
 	}
 
-	// Kill existing postgres if running
-	pidFile := filepath.Join(dbPath, "postmaster.pid")
-	if err := killExistingPostgres(pidFile, logger); err != nil {
-		logger.Warn("Failed to kill existing postgres", zap.Error(err))
-	}
-
-	// Configure embedded Postgres
-	embeddedDBConfig := postgres.DefaultConfig().
-		Username("postgres").
-		Password("postgres").
-		Database("p2p_market_data").
-		Version(postgres.V13).
-		DataPath(dbPath).
-		Port(5433).
-		RuntimePath(runtimePath)
-
-	embeddedDB := postgres.NewDatabase(embeddedDBConfig)
-
-	// Start with retries
-	var startErr error
-	for i := 0; i < 3; i++ {
-		if err := embeddedDB.Start(); err != nil {
-			startErr = err
-			logger.Warn("Failed to start DB, retrying...", zap.Error(err))
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		startErr = nil
-		break
-	}
-	if startErr != nil {
-		logger.Fatal("Failed to start embedded database", zap.Error(startErr))
-	}
-
-	// Repository DB Config - use same port as embedded DB
-	repoDBConfig := &config.DatabaseConfig{
-		Type:     "postgres",
-		URL:      buildPostgresURL("localhost", 5433, "postgres", "postgres", "p2p_market_data", "disable"),
-		MaxConns: 10,
-		Timeout:  30 * time.Second,
-		SSLMode:  "disable",
+	// Initialize database
+	conn, err := initEmbeddedDB(ctx, logger)
+	if err != nil {
+		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 
 	// Initialize repository
-	repo, err := data.NewPostgresRepository(ctx, repoDBConfig.URL, logger)
+	repo, err := data.NewPostgresRepository(ctx, conn, logger)
 	if err != nil {
 		logger.Fatal("Failed to create repository", zap.Error(err))
 	}
 
-	// Initialize script configuration
-	scriptConfig := &config.ScriptConfig{
-		ScriptDir:   "./scripts",
-		PythonPath:  "python3",
-		MaxExecTime: time.Minute,
-		MaxMemoryMB: 512,
-		AllowedPkgs: []string{"pandas", "numpy"},
-	}
-
-	// Initialize script manager
-	scriptManager, err := scripts.NewScriptManager(scriptConfig, logger)
-	if err != nil {
-		logger.Fatal("Failed to create ScriptManager", zap.Error(err))
-	}
-
 	// Initialize P2P host
-	hostConfig := &config.Config{
-		P2P: config.P2PConfig{
-			Port: 4001, // Set your desired port
-		},
-		Security: config.SecurityConfig{
-			KeyFile:       "./keyfile", // Path to your key file
-			MaxPenalty:    0.5,         // Valid value between 0 and 1
-			MinConfidence: 0.7,         // Valid value between 0 and 1
-		},
-	}
-
-	hostNode, err := p2pHost.NewHost(ctx, hostConfig, logger, repo)
+	p2pHost, err := host.NewHost(ctx, cfg, logger, repo)
 	if err != nil {
-		logger.Fatal("Failed to create P2P Host", zap.Error(err))
+		logger.Fatal("Failed to create P2P host", zap.Error(err))
 	}
 
-	// Initialize Network Manager
-	networkMgr, err := host.NewNetworkManager(hostNode, logger)
+	// Initialize schema
+	schemaManager := data.NewSchemaManager(conn)
+	if err := schemaManager.InitializeSchema(ctx); err != nil {
+		logger.Fatal("Failed to initialize schema", zap.Error(err))
+	}
+
+	// Initialize NetworkManager with the P2P host instance
+	networkMgr, err := host.NewNetworkManager(p2pHost, logger)
 	if err != nil {
 		logger.Fatal("Failed to create NetworkManager", zap.Error(err))
 	}
 
-	// Create app with all fields initialized
 	app := &App{
-		ctx:           ctx,
-		logger:        logger,
-		scriptManager: scriptManager,
-		networkMgr:    networkMgr,
-		host:          hostNode,
-		repository:    repo,
-		embeddedDB:    embeddedDB,
+		ctx:        ctx,
+		logger:     logger,
+		repository: repo,
+		host:       p2pHost,
+		networkMgr: networkMgr,
 		cleanup: []func() error{
-			embeddedDB.Stop,
+			func() error { return conn.Close(ctx) },
+			p2pHost.Close,
 		},
 	}
 
@@ -312,11 +244,14 @@ func NewApp() *App {
 }
 
 func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
-	// Start the P2P host
+	// Start P2P host
 	if err := a.host.Start(ctx); err != nil {
-		a.logger.Fatal("Failed to start P2P Host", zap.Error(err))
+		a.logger.Error("Failed to start P2P host", zap.Error(err))
+		return
 	}
+
+	// Start other services
+	a.logger.Info("Application started successfully")
 }
 
 func (a *App) domReady(ctx context.Context) {
@@ -337,11 +272,14 @@ func (a *App) shutdown(ctx context.Context) {
 }
 
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
-	// Logic to run before the application window closes
+	// Close database connection and other resources before the application window closes
+	for _, cleanupFunc := range a.cleanup {
+		if err := cleanupFunc(); err != nil {
+			a.logger.Error("Cleanup error", zap.Error(err))
+		}
+	}
 	return false
 }
-
-// Implementing the methods required by handleScripts.ts
 
 // GetScriptContent returns the content of a script by its ID
 func (a *App) GetScriptContent(scriptID string) (string, error) {

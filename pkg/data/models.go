@@ -45,6 +45,34 @@ type MarketData struct {
 	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
+// SearchResult represents a search result item
+type SearchResult struct {
+	ID    string
+	Score float64
+}
+
+// DataSource represents a data source in the network
+type DataSource struct {
+	ID               string    `json:"id"`
+	PeerID           string    `json:"peer_id"`
+	Reputation       float64   `json:"reputation"`
+	DataTypes        []string  `json:"data_types"`
+	AvailableSymbols []string  `json:"available_symbols"`
+	DataRangeStart   time.Time `json:"data_range_start"`
+	DataRangeEnd     time.Time `json:"data_range_end"`
+	LastUpdate       time.Time `json:"last_update"`
+	Reliability      float64   `json:"reliability"`
+}
+
+// DataRequest represents a request for data
+type DataRequest struct {
+	Type        string    `json:"type"`
+	Symbol      string    `json:"symbol"`
+	StartDate   time.Time `json:"start_date"`
+	EndDate     time.Time `json:"end_date"`
+	Granularity string    `json:"granularity"`
+}
+
 // NewMarketData creates a new MarketData instance with validation
 func NewMarketData(symbol string, price float64, volume float64, source string, dataType string) (*MarketData, error) {
 	if symbol == "" {
@@ -188,6 +216,7 @@ type Peer struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	Status      string    `json:"status"`
+	Metadata    Metadata  `json:"metadata,omitempty"`
 }
 
 // NewPeer creates a new Peer instance
@@ -364,12 +393,12 @@ type InsiderTrade struct {
 // SplitData represents stock split information
 type SplitData struct {
 	MarketDataBase
-	SplitRatio      float64   `json:"split_ratio"`      // e.g., 2.0 for 2:1 split
+	SplitRatio       float64   `json:"split_ratio"` // e.g., 2.0 for 2:1 split
 	AnnouncementDate time.Time `json:"announcement_date"`
-	ExDate          time.Time `json:"ex_date"`
-	OldShares       int       `json:"old_shares"`
-	NewShares       int       `json:"new_shares"`
-	Status          string    `json:"status"`           // announced, completed, cancelled
+	ExDate           time.Time `json:"ex_date"`
+	OldShares        int       `json:"old_shares"`
+	NewShares        int       `json:"new_shares"`
+	Status           string    `json:"status"` // announced, completed, cancelled
 }
 
 // Add validation method for SplitData
@@ -408,12 +437,12 @@ func NewSplitData(
 	}
 
 	split := &SplitData{
-		MarketDataBase:   base,
-		SplitRatio:      ratio,
-		ExDate:          exDate,
-		OldShares:       oldShares,
-		NewShares:       newShares,
-		Status:          "announced",
+		MarketDataBase: base,
+		SplitRatio:     ratio,
+		ExDate:         exDate,
+		OldShares:      oldShares,
+		NewShares:      newShares,
+		Status:         "announced",
 	}
 
 	if err := split.Validate(); err != nil {
@@ -421,28 +450,6 @@ func NewSplitData(
 	}
 
 	return split, nil
-}
-
-// DataSource represents a data source in the network
-type DataSource struct {
-	ID               string    `json:"id"`
-	PeerID           string    `json:"peer_id"`
-	Reputation       float64   `json:"reputation"`
-	DataTypes        []string  `json:"data_types"`
-	AvailableSymbols []string  `json:"available_symbols"`
-	DataRangeStart   time.Time `json:"data_range_start"`
-	DataRangeEnd     time.Time `json:"data_range_end"`
-	LastUpdate       time.Time `json:"last_update"`
-	Reliability      float64   `json:"reliability"`
-}
-
-// DataRequest represents a request for data
-type DataRequest struct {
-	Type        string    `json:"type"`
-	Symbol      string    `json:"symbol"`
-	StartDate   time.Time `json:"start_date"`
-	EndDate     time.Time `json:"end_date"`
-	Granularity string    `json:"granularity"`
 }
 
 // Implement GetDataSources in PostgresRepository
@@ -470,17 +477,4 @@ func (r *PostgresRepository) GetDataSources(ctx context.Context) ([]DataSource, 
 	}
 
 	return sources, nil
-}
-
-// Implement GetDataSources in MockRepository
-func (m *MockRepository) GetDataSources(ctx context.Context) ([]DataSource, error) {
-	// Return mock data sources
-	return []DataSource{}, nil
-}
-
-// SearchResult represents a search result item
-type SearchResult struct {
-	ID    string
-	Score float64
-	// Add other relevant fields
 }

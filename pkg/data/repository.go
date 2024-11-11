@@ -9,8 +9,8 @@ import (
 	"p2p_market_data/pkg/config"
 
 	"github.com/jackc/pgconn"
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +42,8 @@ type Repository interface {
 	DeletePeer(ctx context.Context, id string) error
 
 	// Stake operations
+	CreateStake(ctx context.Context, stake *Stake) error
+	ListStakesByPeer(ctx context.Context, peerID string) ([]*Stake, error)
 	SaveStake(ctx context.Context, stake *Stake) error
 	GetStake(ctx context.Context, id string) (*Stake, error)
 	GetStakesByPeer(ctx context.Context, peerID string) ([]*Stake, error)
@@ -81,8 +83,9 @@ type PeerFilter struct {
 
 // PostgresRepository implements Repository interface using PostgreSQL
 type PostgresRepository struct {
-	pool   *pgxpool.Pool
+	conn   *pgx.Conn
 	logger *zap.Logger
+	pool   *pgxpool.Pool
 }
 
 // GetPeer implements Repository.
@@ -107,7 +110,31 @@ func (r *PostgresRepository) ListPeers(ctx context.Context, filter PeerFilter) (
 
 // SavePeer implements Repository.
 func (r *PostgresRepository) SavePeer(ctx context.Context, peer *Peer) error {
-	panic("unimplemented")
+	query := `
+        INSERT INTO peers (id, address, reputation, last_seen, roles, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (id) DO UPDATE SET
+            address = EXCLUDED.address,
+            reputation = EXCLUDED.reputation,
+            last_seen = EXCLUDED.last_seen,
+            roles = EXCLUDED.roles,
+            metadata = EXCLUDED.metadata
+    `
+
+	_, err := r.conn.Exec(ctx, query,
+		peer.ID,
+		peer.Address,
+		peer.Reputation,
+		peer.LastSeen,
+		peer.Roles,
+		peer.Metadata,
+	)
+
+	if err != nil {
+		return fmt.Errorf("saving peer: %w", err)
+	}
+
+	return nil
 }
 
 // SaveStake implements Repository.
@@ -126,37 +153,38 @@ func (r *PostgresRepository) UpdateStake(ctx context.Context, stake *Stake) erro
 }
 
 // NewPostgresRepository creates a new PostgreSQL repository instance
-func NewPostgresRepository(ctx context.Context, connStr string, logger *zap.Logger) (*PostgresRepository, error) {
-	config, err := pgxpool.ParseConfig(connStr)
-	if err != nil {
-		return nil, fmt.Errorf("parsing connection string: %w", err)
-	}
-
-	config.MaxConns = 10
-	config.MinConns = 2
-	config.MaxConnLifetime = time.Hour
-	config.MaxConnIdleTime = 30 * time.Minute
-
-	pool, err := pgxpool.ConnectConfig(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to database: %w", err)
-	}
-
+func NewPostgresRepository(ctx context.Context, conn *pgx.Conn, logger *zap.Logger) (*PostgresRepository, error) {
 	// Verify connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
+	if err := conn.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
 
+	// Create connection pool config from existing connection
+	poolConfig, err := pgxpool.ParseConfig(conn.Config().ConnString())
+	if err != nil {
+		return nil, fmt.Errorf("parsing pool config: %w", err)
+	}
+
+	// Set pool options
+	poolConfig.MaxConns = 10
+	poolConfig.MinConns = 2
+
+	// Create the connection pool
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		return nil, fmt.Errorf("creating connection pool: %w", err)
+	}
+
 	return &PostgresRepository{
+		conn:   conn,
 		pool:   pool,
 		logger: logger,
 	}, nil
 }
 
 // Close releases all database resources
-func (r *PostgresRepository) Close() {
-	r.pool.Close()
+func (r *PostgresRepository) Close(ctx context.Context) {
+	r.conn.Close(ctx)
 }
 
 // SaveMarketData persists market data to the database
@@ -173,7 +201,7 @@ func (r *PostgresRepository) SaveMarketData(ctx context.Context, data *MarketDat
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		)`
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err := r.conn.Exec(ctx, query,
 		data.ID, data.Symbol, data.Price, data.Volume, data.Timestamp,
 		data.Source, data.DataType, data.Signatures, data.MetaData,
 		data.ValidationScore, data.Hash, data.CreatedAt, data.UpdatedAt,
@@ -198,7 +226,7 @@ func (r *PostgresRepository) GetMarketData(ctx context.Context, id string) (*Mar
 		WHERE id = $1`
 
 	data := &MarketData{}
-	err := r.pool.QueryRow(ctx, query, id).Scan(
+	err := r.conn.QueryRow(ctx, query, id).Scan(
 		&data.ID, &data.Symbol, &data.Price, &data.Volume, &data.Timestamp,
 		&data.Source, &data.DataType, &data.Signatures, &data.MetaData,
 		&data.ValidationScore, &data.Hash, &data.CreatedAt, &data.UpdatedAt,
@@ -283,7 +311,7 @@ func (r *PostgresRepository) ListMarketData(ctx context.Context, filter MarketDa
 		args = append(args, filter.Offset)
 	}
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := r.conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying market data list: %w", err)
 	}
@@ -323,7 +351,7 @@ func (r *PostgresRepository) UpdateMarketData(ctx context.Context, data *MarketD
 				validation_score = $9, hash = $10, updated_at = $11
 			WHERE id = $12`
 
-	result, err := r.pool.Exec(ctx, query,
+	result, err := r.conn.Exec(ctx, query,
 		data.Symbol, data.Price, data.Volume, data.Timestamp,
 		data.Source, data.DataType, data.Signatures, data.MetaData,
 		data.ValidationScore, data.Hash, time.Now().UTC(), data.ID,
@@ -344,7 +372,7 @@ func (r *PostgresRepository) UpdateMarketData(ctx context.Context, data *MarketD
 func (r *PostgresRepository) DeleteMarketData(ctx context.Context, id string) error {
 	query := `DELETE FROM market_data WHERE id = $1`
 
-	result, err := r.pool.Exec(ctx, query, id)
+	result, err := r.conn.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("deleting market data: %w", err)
 	}
@@ -368,7 +396,7 @@ func (r *PostgresRepository) SaveVote(ctx context.Context, vote *Vote) error {
 				timestamp, signature, reason
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err := r.conn.Exec(ctx, query,
 		vote.ID, vote.MarketDataID, vote.ValidatorID, vote.IsValid,
 		vote.Confidence, vote.Timestamp, vote.Signature, vote.Reason,
 	)
@@ -413,6 +441,18 @@ func (r *PostgresRepository) GetInsiderData(ctx context.Context, symbol, startDa
 	return nil, nil
 }
 
+// CreateStake creates a new stake record in the database
+func (r *PostgresRepository) CreateStake(ctx context.Context, stake *Stake) error {
+	// TODO: Implement actual database query
+	panic("unimplemented")
+}
+
+// ListStakesByPeer retrieves all stakes for a specific peer
+func (r *PostgresRepository) ListStakesByPeer(ctx context.Context, peerID string) ([]*Stake, error) {
+	// TODO: Implement actual database query
+	panic("unimplemented")
+}
+
 // GetDividendData retrieves dividend data based on symbol and date range
 func (r *PostgresRepository) GetDividendData(ctx context.Context, symbol, startDate, endDate string) ([]DividendData, error) {
 	// TODO: Implement actual database query
@@ -433,7 +473,7 @@ func (r *PostgresRepository) GetEODData(ctx context.Context, symbol, startDate, 
 
 // Helper function to query votes
 func (r *PostgresRepository) queryVotes(ctx context.Context, query string, arg interface{}) ([]*Vote, error) {
-	rows, err := r.pool.Query(ctx, query, arg)
+	rows, err := r.conn.Query(ctx, query, arg)
 	if err != nil {
 		return nil, fmt.Errorf("querying votes: %w", err)
 	}
@@ -469,7 +509,7 @@ func isPgDuplicateError(err error) bool {
 func (r *PostgresRepository) DeletePeer(ctx context.Context, id string) error {
 	query := `DELETE FROM peers WHERE id = $1`
 
-	result, err := r.pool.Exec(ctx, query, id)
+	result, err := r.conn.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("deleting peer: %w", err)
 	}
@@ -483,19 +523,19 @@ func (r *PostgresRepository) DeletePeer(ctx context.Context, id string) error {
 
 // NewRepository creates a new repository instance based on configuration
 func NewRepository(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.Logger) (Repository, error) {
-	pool, err := pgxpool.Connect(ctx, cfg.URL)
+	conn, err := pgx.Connect(ctx, cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	repo := &PostgresRepository{
-		pool:   pool,
+		conn:   conn,
 		logger: logger,
 	}
 
 	// Test connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
+	if err := conn.Ping(ctx); err != nil {
+		conn.Close(ctx)
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 

@@ -15,6 +15,7 @@ import (
 	"p2p_market_data/pkg/scripts"
 	"p2p_market_data/pkg/utils"
 
+	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 )
 
@@ -52,12 +53,19 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Initialize PostgreSQL connection
+	conn, err := pgx.Connect(ctx, cfg.Database.URL)
+	if err != nil {
+		logger.Fatal("Failed to connect to database", zap.Error(err))
+	}
+	defer conn.Close(ctx)
+
 	// Initialize PostgreSQL repository
-	repo, err := data.NewPostgresRepository(ctx, cfg.Database.URL, logger)
+	repo, err := data.NewPostgresRepository(ctx, conn, logger)
 	if err != nil {
 		logger.Fatal("Failed to initialize Postgres repository", zap.Error(err))
 	}
-	defer repo.Close() // Ensure repository is closed properly
+	defer repo.Close(ctx)
 
 	// Initializei P2P host
 	h, err := host.NewHost(ctx, cfg, logger, repo)

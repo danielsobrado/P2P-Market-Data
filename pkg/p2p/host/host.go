@@ -2,9 +2,9 @@ package host
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,12 +14,11 @@ import (
 	"p2p_market_data/pkg/security"
 
 	libp2p "github.com/libp2p/go-libp2p"
-	libp2pCrypto "github.com/libp2p/go-libp2p/core/crypto"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	libp2pHost "github.com/libp2p/go-libp2p/core/host"
 	libp2pNetwork "github.com/libp2p/go-libp2p/core/network"
 	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	libp2pProtocol "github.com/libp2p/go-libp2p/core/protocol"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"go.uber.org/zap"
 )
 
@@ -67,42 +66,54 @@ type Host struct {
 
 // NewHost creates a new P2P host
 func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo data.Repository) (*Host, error) {
+	// Validate P2P configuration
 	if err := validateP2PConfig(&cfg.P2P); err != nil {
 		return nil, fmt.Errorf("invalid P2P configuration: %w", err)
 	}
 
-	// Generate or load host key
+	// Ensure key directory exists
+	keyDir := filepath.Dir(cfg.Security.KeyFile)
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		return nil, fmt.Errorf("creating key directory: %w", err)
+	}
+
+	// Load or generate host key
 	privKey, err := loadOrGenerateKey(cfg.Security.KeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("key management error: %w", err)
 	}
 
-	// Create libp2p host
-	h, err := libp2p.New(
+	// Create libp2p host with custom options
+	opts := []libp2p.Option{
 		libp2p.Identity(privKey),
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", cfg.P2P.Port)),
 		libp2p.EnableRelay(),
 		libp2p.NATPortMap(),
-	)
+	}
+
+	h, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create libp2p host: %w", err)
 	}
 
-	// Initialize pubsub
-	ps, err := pubsub.NewGossipSub(ctx, h)
+	// Initialize pubsub with custom options
+	pubsubOpts := []pubsub.Option{
+		pubsub.WithMessageSigning(true),
+		pubsub.WithStrictSignatureVerification(true),
+	}
+	ps, err := pubsub.NewGossipSub(ctx, h, pubsubOpts...)
 	if err != nil {
 		h.Close()
 		return nil, fmt.Errorf("failed to create pubsub: %w", err)
 	}
 
-	// Initialize validator
+	// Initialize components
 	validator, err := security.NewValidator(cfg.Security)
 	if err != nil {
 		h.Close()
 		return nil, fmt.Errorf("failed to initialize validator: %w", err)
 	}
 
-	// Initialize PeerStore
 	peerStore := NewPeerStore(repo)
 
 	host := &Host{
@@ -122,22 +133,24 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 		ctx:        ctx,
 	}
 
-	// Initialize topics and subscriptions
+	// Initialize host components
 	if err := host.initializeTopics(ctx); err != nil {
 		h.Close()
 		return nil, fmt.Errorf("failed to initialize topics: %w", err)
 	}
 
-	// Set up protocol handlers
 	host.setupProtocolHandlers()
 
-	// Initialize NetworkManager
 	networkMgr, err := NewNetworkManager(host, logger)
 	if err != nil {
 		h.Close()
 		return nil, fmt.Errorf("failed to initialize network manager: %w", err)
 	}
 	host.networkMgr = networkMgr
+
+	logger.Info("P2P host initialized",
+		zap.String("peerID", h.ID().String()),
+		zap.Int("port", cfg.P2P.Port))
 
 	return host, nil
 }
@@ -533,40 +546,6 @@ func (h *Host) verifyMessage(msg *message.Message) error {
 	}
 
 	return nil
-}
-
-// loadOrGenerateKey loads the private key from file or generates a new one
-func loadOrGenerateKey(keyFile string) (libp2pCrypto.PrivKey, error) {
-	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-		// Generate new key
-		priv, _, err := libp2pCrypto.GenerateKeyPairWithReader(libp2pCrypto.RSA, 2048, rand.Reader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate key: %w", err)
-		}
-
-		// Save key to file
-		keyBytes, err := libp2pCrypto.MarshalPrivateKey(priv)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal private key: %w", err)
-		}
-		if err := os.WriteFile(keyFile, keyBytes, 0600); err != nil {
-			return nil, fmt.Errorf("failed to save key to file: %w", err)
-		}
-
-		return priv, nil
-	}
-
-	// Load key from file
-	keyBytes, err := os.ReadFile(keyFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read key file: %w", err)
-	}
-	priv, err := libp2pCrypto.UnmarshalPrivateKey(keyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal private key: %w", err)
-	}
-
-	return priv, nil
 }
 
 // validateConfig validates the P2P configuration

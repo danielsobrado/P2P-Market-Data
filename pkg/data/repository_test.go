@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
@@ -19,7 +20,9 @@ func setupTestDB(t *testing.T) *PostgresRepository {
 	}
 
 	logger := zaptest.NewLogger(t)
-	repo, err := NewPostgresRepository(context.Background(), connStr, logger)
+	conn, err := pgx.Connect(context.Background(), connStr)
+	require.NoError(t, err)
+	repo, err := NewPostgresRepository(context.Background(), conn, logger)
 	require.NoError(t, err)
 
 	// Clear test data
@@ -45,9 +48,8 @@ func clearTestData(t *testing.T, repo *PostgresRepository) {
 
 func TestMarketDataOperations(t *testing.T) {
 	repo := setupTestDB(t)
-	defer repo.Close()
-
 	ctx := context.Background()
+	defer repo.Close(ctx)
 
 	t.Run("CRUD Operations", func(t *testing.T) {
 		// Create
@@ -106,9 +108,8 @@ func TestMarketDataOperations(t *testing.T) {
 
 func TestVoteOperations(t *testing.T) {
 	repo := setupTestDB(t)
-	defer repo.Close()
-
 	ctx := context.Background()
+	defer repo.Close(ctx)
 
 	t.Run("Vote Management", func(t *testing.T) {
 		// Create market data
@@ -151,9 +152,8 @@ func TestStakeOperations(t *testing.T) {
 
 func TestConcurrentOperations(t *testing.T) {
 	repo := setupTestDB(t)
-	defer repo.Close()
-
 	ctx := context.Background()
+	defer repo.Close(ctx)
 	numGoroutines := 10
 
 	t.Run("Concurrent Market Data Creation", func(t *testing.T) {
@@ -241,9 +241,8 @@ func TestConcurrentOperations(t *testing.T) {
 
 func TestEdgeCases(t *testing.T) {
 	repo := setupTestDB(t)
-	defer repo.Close()
-
 	ctx := context.Background()
+	defer repo.Close(ctx)
 
 	t.Run("Duplicate MarketData", func(t *testing.T) {
 		data, err := NewMarketData("BTC/USD", 50000.0, 1.0, "test_source", "spot")
@@ -294,9 +293,8 @@ func TestEdgeCases(t *testing.T) {
 
 func TestTransactionBehavior(t *testing.T) {
 	repo := setupTestDB(t)
-	defer repo.Close()
-
 	ctx := context.Background()
+	defer repo.Close(ctx)
 
 	t.Run("Transaction Rollback", func(t *testing.T) {
 		// Begin transaction
@@ -335,9 +333,8 @@ func TestQueryPerformance(t *testing.T) {
 	}
 
 	repo := setupTestDB(t)
-	defer repo.Close()
-
 	ctx := context.Background()
+	defer repo.Close(ctx)
 
 	// Create test data
 	numRecords := 1000
@@ -390,9 +387,8 @@ func TestQueryPerformance(t *testing.T) {
 
 func TestRepositoryCleanup(t *testing.T) {
 	repo := setupTestDB(t)
-	defer repo.Close()
-
 	ctx := context.Background()
+	defer repo.Close(ctx)
 
 	t.Run("Connection Pool Management", func(t *testing.T) {
 		// Verify connection pool is active
@@ -400,7 +396,7 @@ func TestRepositoryCleanup(t *testing.T) {
 		require.NoError(t, err)
 
 		// Close repository
-		repo.Close()
+		repo.Close(ctx)
 
 		// Verify connections are closed
 		err = repo.pool.Ping(ctx)

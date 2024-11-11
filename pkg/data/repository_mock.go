@@ -78,6 +78,14 @@ func (m *MockRepository) SaveStake(ctx context.Context, stake *Stake) error {
 	return nil
 }
 
+func (m *MockRepository) ListStakesByPeer(ctx context.Context, peerID string) ([]*Stake, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) CreateStake(ctx context.Context, stake *Stake) error {
+	return nil
+}
+
 // Dividend operations
 func (m *MockRepository) GetDividendData(ctx context.Context, symbol, startDate, endDate string) ([]DividendData, error) {
 	return []DividendData{}, nil
@@ -102,5 +110,10 @@ func (m *MockRepository) UpdateStake(ctx context.Context, stake *Stake) error {
 
 // SearchData operation
 func (m *MockRepository) SearchData(ctx context.Context, request DataRequest) ([]DataSource, error) {
+	return []DataSource{}, nil
+}
+
+// GetDataSources operation
+func (m *MockRepository) GetDataSources(ctx context.Context) ([]DataSource, error) {
 	return []DataSource{}, nil
 }

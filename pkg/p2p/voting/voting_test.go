@@ -79,6 +79,10 @@ func (m *MockRepository) DeletePeer(ctx context.Context, id string) error {
 }
 
 // Stake operations
+func (m *MockRepository) CreateStake(ctx context.Context, stake *data.Stake) error {
+	return nil
+}
+
 func (m *MockRepository) SaveStake(ctx context.Context, stake *data.Stake) error {
 	return nil
 }
@@ -88,6 +92,10 @@ func (m *MockRepository) GetStake(ctx context.Context, id string) (*data.Stake, 
 }
 
 func (m *MockRepository) GetStakesByPeer(ctx context.Context, peerID string) ([]*data.Stake, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) ListStakesByPeer(ctx context.Context, peerID string) ([]*data.Stake, error) {
 	return nil, nil
 }
 
