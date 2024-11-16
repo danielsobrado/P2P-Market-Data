@@ -567,7 +567,7 @@ func validateP2PConfig(cfg *config.P2PConfig) error {
 	if cfg.Port == 0 {
 		return fmt.Errorf("P2P port must be specified")
 	}
-	// TODO: Failes here
+	// TODO: Fails here
 	// if cfg.Security.KeyFile == "" {
 	// 	return fmt.Errorf("security key file must be specified")
 	// }
