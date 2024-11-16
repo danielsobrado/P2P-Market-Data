@@ -34,11 +34,12 @@ type ScriptMetadata struct {
 
 // ScriptManager handles script storage and management
 type ScriptManager struct {
-	Config   *config.ScriptConfig
-	Executor *ScriptExecutor
-	logger   *zap.Logger
-	scripts  map[string]*ScriptMetadata
-	mu       sync.RWMutex
+	Config    *config.ScriptConfig
+	Executor  *ScriptExecutor
+	logger    *zap.Logger
+	scripts   map[string]*ScriptMetadata
+	mu        sync.RWMutex
+	isRunning bool
 }
 
 // NewScriptManager creates a new script manager
@@ -68,21 +69,48 @@ func NewScriptManager(config *config.ScriptConfig, logger *zap.Logger) (*ScriptM
 	return manager, nil
 }
 
+// Start initializes the ScriptManager and starts any background processes
+func (m *ScriptManager) Start(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.logger.Info("Starting Script Manager")
+
+	// Initialize executor if needed
+	if m.Executor == nil {
+		executor, err := NewScriptExecutor(m.Config, m.logger)
+		if err != nil {
+			return fmt.Errorf("creating executor: %w", err)
+		}
+		m.Executor = executor
+	}
+
+	// Load existing scripts
+	if err := m.loadScripts(); err != nil {
+		return fmt.Errorf("loading scripts: %w", err)
+	}
+
+	m.isRunning = true
+
+	return nil
+}
+
 // Stop gracefully shuts down the ScriptManager, performing any necessary cleanup.
-func (m *ScriptManager) Stop() error {
-	// Add any cleanup logic here if needed.
-	// For example, stopping running scripts, closing channels, etc.
+func (m *ScriptManager) Stop(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.logger.Info("Stopping Script Manager")
 
-	// If there are background processes or resources to clean up, handle them here.
-	// Example:
-	// if m.Executor != nil {
-	//     if err := m.Executor.Shutdown(); err != nil {
-	//         m.logger.Error("Error shutting down executor", zap.Error(err))
-	//         return err
-	//     }
-	// }
+	// Stop the executor
+	if m.Executor != nil {
+		if err := m.Executor.Stop(ctx); err != nil {
+			m.logger.Error("Error stopping executor", zap.Error(err))
+			return fmt.Errorf("stopping executor: %w", err)
+		}
+	}
+
+	m.isRunning = false
 
 	return nil
 }
@@ -424,4 +452,11 @@ type ScriptHistoryEntry struct {
 	Timestamp time.Time
 	Hash      string
 	Size      int64
+}
+
+// isRunning
+func (m *ScriptManager) IsRunning() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.isRunning
 }

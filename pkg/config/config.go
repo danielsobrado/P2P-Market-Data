@@ -24,11 +24,16 @@ type Config struct {
 
 // DatabaseConfig holds database connection settings
 type DatabaseConfig struct {
-	Type     string        `mapstructure:"type"` // e.g. "postgres", "sqlite"
-	URL      string        `mapstructure:"url"`
-	MaxConns int           `mapstructure:"max_conns"`
-	Timeout  time.Duration `mapstructure:"timeout"`
-	SSLMode  string        `mapstructure:"ssl_mode"`
+	Type            string        `mapstructure:"type"` // e.g. "postgres", "sqlite"
+	URL             string        `mapstructure:"url"`
+	Port            int           `mapstructure:"port"`
+	Host            string        `mapstructure:"host"`
+	MaxConnections  int           `mapstructure:"max_conns"`
+	MinConnections  int           `mapstructure:"min_conns"`
+	MaxConnLifetime time.Duration `mapstructure:"max_conn_lifetime"`
+	MaxConnIdleTime time.Duration `mapstructure:"max_conn_idle_time"`
+	Timeout         time.Duration `mapstructure:"timeout"`
+	SSLMode         string        `mapstructure:"ssl_mode"`
 }
 
 // P2PConfig holds P2P network related configuration
@@ -67,7 +72,7 @@ type SchedConfig struct {
 type SecurityConfig struct {
 	MinReputationScore float64       `mapstructure:"min_reputation_score"`
 	MaxPenalty         float64       `mapstructure:"max_penalty"`
-	MinConfidence      float64       `json:"min_confidence"`
+	MinConfidence      float64       `mapstructure:"min_confidence"`
 	KeyFile            string        `mapstructure:"key_file"`
 	AuthorityNodes     []string      `mapstructure:"authority_nodes"`
 	TokenExpiry        time.Duration `mapstructure:"token_expiry"`
@@ -196,7 +201,7 @@ func (c *Config) validateDatabase() error {
 	if c.Database.URL == "" {
 		return fmt.Errorf("database URL cannot be empty")
 	}
-	if c.Database.MaxConns <= 0 {
+	if c.Database.MaxConnections <= 0 {
 		return fmt.Errorf("max_conns must be positive")
 	}
 	if c.Database.Timeout <= 0 {

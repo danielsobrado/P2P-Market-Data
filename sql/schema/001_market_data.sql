@@ -2,7 +2,10 @@
 CREATE TABLE IF NOT EXISTS market_data (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     symbol TEXT NOT NULL,
-    price DECIMAL NOT NULL,
+    open DECIMAL NOT NULL,
+    high DECIMAL NOT NULL,
+    low DECIMAL NOT NULL,
+    close DECIMAL NOT NULL,
     volume DECIMAL NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
     source TEXT NOT NULL,

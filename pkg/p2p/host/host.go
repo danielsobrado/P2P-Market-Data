@@ -48,6 +48,7 @@ type Host struct {
 	peerStore *PeerStore
 	validator *security.Validator
 	logger    *zap.Logger
+	running   bool
 
 	// Channels for coordination
 	shutdown   chan struct{}
@@ -69,6 +70,11 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 	// Validate P2P configuration
 	if err := validateP2PConfig(&cfg.P2P); err != nil {
 		return nil, fmt.Errorf("invalid P2P configuration: %w", err)
+	}
+
+	// Ensure Security configuration is not nil
+	if cfg.Security.KeyFile == "" {
+		return nil, fmt.Errorf("security key file must be specified")
 	}
 
 	// Ensure key directory exists
@@ -175,12 +181,13 @@ func (h *Host) Start(ctx context.Context) error {
 	if err := h.connectToBootstrapPeers(ctx); err != nil {
 		h.logger.Warn("Failed to connect to some bootstrap peers", zap.Error(err))
 	}
-
 	h.mu.Lock()
 	h.status.IsReady = true
 	h.status.UpdatedAt = time.Now()
+	h.running = true
 	h.mu.Unlock()
 
+	return nil
 	return nil
 }
 
@@ -209,11 +216,15 @@ func (h *Host) Stop() error {
 			h.logger.Warn("Failed to close network manager", zap.Error(err))
 		}
 	}
-
-	// Close host
 	if err := h.host.Close(); err != nil {
 		return fmt.Errorf("failed to close libp2p host: %w", err)
 	}
+
+	h.mu.Lock()
+	h.running = false
+	h.mu.Unlock()
+
+	h.logger.Info("P2P host stopped")
 
 	h.logger.Info("P2P host stopped")
 	return nil
@@ -550,9 +561,17 @@ func (h *Host) verifyMessage(msg *message.Message) error {
 
 // validateConfig validates the P2P configuration
 func validateP2PConfig(cfg *config.P2PConfig) error {
-	if cfg.Port <= 0 || cfg.Port > 65535 {
-		return fmt.Errorf("invalid port number: %d", cfg.Port)
+	if cfg == nil {
+		return fmt.Errorf("P2P configuration is nil")
 	}
+	if cfg.Port == 0 {
+		return fmt.Errorf("P2P port must be specified")
+	}
+	// TODO: Failes here
+	// if cfg.Security.KeyFile == "" {
+	// 	return fmt.Errorf("security key file must be specified")
+	// }
+
 	return nil
 }
 
@@ -572,4 +591,12 @@ func (h *Host) GetTopic(topicName string) (*pubsub.Topic, error) {
 // StringToPeerID converts a string to a libp2p PeerID
 func (h *Host) StringToPeerID(peerIDStr string) (libp2pPeer.ID, error) {
 	return libp2pPeer.Decode(peerIDStr)
+}
+
+// IsRunning returns the current running state of the host
+
+func (h *Host) IsRunning() bool {
+
+	return h.running
+
 }

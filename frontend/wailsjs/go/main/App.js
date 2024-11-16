@@ -6,22 +6,6 @@ export function CheckConnection() {
   return window['go']['main']['App']['CheckConnection']();
 }
 
-export function Close() {
-  return window['go']['main']['App']['Close']();
-}
-
-export function DeleteScript(arg1) {
-  return window['go']['main']['App']['DeleteScript'](arg1);
-}
-
-export function DisconnectPeer(arg1) {
-  return window['go']['main']['App']['DisconnectPeer'](arg1);
-}
-
-export function Executor() {
-  return window['go']['main']['App']['Executor']();
-}
-
 export function GetDataSources() {
   return window['go']['main']['App']['GetDataSources']();
 }
@@ -34,10 +18,6 @@ export function GetEODData(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetEODData'](arg1, arg2, arg3);
 }
 
-export function GetInsiderData(arg1, arg2, arg3) {
-  return window['go']['main']['App']['GetInsiderData'](arg1, arg2, arg3);
-}
-
 export function GetPeers() {
   return window['go']['main']['App']['GetPeers']();
 }
@@ -46,50 +26,22 @@ export function GetScriptContent(arg1) {
   return window['go']['main']['App']['GetScriptContent'](arg1);
 }
 
-export function InstallScript(arg1) {
-  return window['go']['main']['App']['InstallScript'](arg1);
-}
-
-export function RequestData(arg1, arg2) {
-  return window['go']['main']['App']['RequestData'](arg1, arg2);
-}
-
-export function ResetDataConnection() {
-  return window['go']['main']['App']['ResetDataConnection']();
-}
-
-export function ResetDataProcessing() {
-  return window['go']['main']['App']['ResetDataProcessing']();
-}
-
-export function RetryConnection() {
-  return window['go']['main']['App']['RetryConnection']();
+export function GetServerStatus() {
+  return window['go']['main']['App']['GetServerStatus']();
 }
 
 export function RunScript(arg1) {
   return window['go']['main']['App']['RunScript'](arg1);
 }
 
-export function SearchData(arg1) {
-  return window['go']['main']['App']['SearchData'](arg1);
+export function SaveMarketData(arg1) {
+  return window['go']['main']['App']['SaveMarketData'](arg1);
+}
+
+export function SearchMarketData(arg1) {
+  return window['go']['main']['App']['SearchMarketData'](arg1);
 }
 
 export function StopScript(arg1) {
   return window['go']['main']['App']['StopScript'](arg1);
-}
-
-export function UninstallScript(arg1) {
-  return window['go']['main']['App']['UninstallScript'](arg1);
-}
-
-export function UploadFileData(arg1, arg2) {
-  return window['go']['main']['App']['UploadFileData'](arg1, arg2);
-}
-
-export function UploadMarketData(arg1) {
-  return window['go']['main']['App']['UploadMarketData'](arg1);
-}
-
-export function UploadScript(arg1) {
-  return window['go']['main']['App']['UploadScript'](arg1);
 }

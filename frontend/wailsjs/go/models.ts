@@ -1,45 +1,5 @@
 export namespace data {
 	
-	export class DataRequest {
-	    type: string;
-	    symbol: string;
-	    // Go type: time
-	    start_date: any;
-	    // Go type: time
-	    end_date: any;
-	    granularity: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new DataRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.type = source["type"];
-	        this.symbol = source["symbol"];
-	        this.start_date = this.convertValues(source["start_date"], null);
-	        this.end_date = this.convertValues(source["end_date"], null);
-	        this.granularity = source["granularity"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
 	export class DataSource {
 	    id: string;
 	    peer_id: string;
@@ -221,52 +181,108 @@ export namespace data {
 		    return a;
 		}
 	}
-	export class InsiderTrade {
+	export class MarketData {
 	    id: string;
 	    symbol: string;
+	    price: number;
+	    volume: number;
 	    // Go type: time
 	    timestamp: any;
 	    source: string;
 	    data_type: string;
+	    signatures: {[key: string]: uint8[]};
+	    metadata?: {[key: string]: string};
 	    validation_score: number;
-	    up_votes: number;
-	    down_votes: number;
-	    metadata: {[key: string]: string};
-	    insider_name: string;
-	    insider_title: string;
-	    trade_type: string;
+	    hash: string;
 	    // Go type: time
-	    trade_date: any;
-	    position: string;
-	    shares: number;
-	    price_per_share: number;
-	    value: number;
-	    transaction_type: string;
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
 	
 	    static createFrom(source: any = {}) {
-	        return new InsiderTrade(source);
+	        return new MarketData(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.symbol = source["symbol"];
+	        this.price = source["price"];
+	        this.volume = source["volume"];
 	        this.timestamp = this.convertValues(source["timestamp"], null);
 	        this.source = source["source"];
 	        this.data_type = source["data_type"];
-	        this.validation_score = source["validation_score"];
-	        this.up_votes = source["up_votes"];
-	        this.down_votes = source["down_votes"];
+	        this.signatures = source["signatures"];
 	        this.metadata = source["metadata"];
-	        this.insider_name = source["insider_name"];
-	        this.insider_title = source["insider_title"];
-	        this.trade_type = source["trade_type"];
-	        this.trade_date = this.convertValues(source["trade_date"], null);
-	        this.position = source["position"];
-	        this.shares = source["shares"];
-	        this.price_per_share = source["price_per_share"];
-	        this.value = source["value"];
-	        this.transaction_type = source["transaction_type"];
+	        this.validation_score = source["validation_score"];
+	        this.hash = source["hash"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MarketDataFilter {
+	
+	
+	    static createFrom(source: any = {}) {
+	        return new MarketDataFilter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	
+	    }
+	}
+	export class Peer {
+	    id: string;
+	    address: string;
+	    public_key: number[];
+	    reputation: number;
+	    // Go type: time
+	    last_seen: any;
+	    is_authority: boolean;
+	    roles: string[];
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+	    status: string;
+	    metadata?: {[key: string]: any};
+	
+	    static createFrom(source: any = {}) {
+	        return new Peer(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.address = source["address"];
+	        this.public_key = source["public_key"];
+	        this.reputation = source["reputation"];
+	        this.last_seen = this.convertValues(source["last_seen"], null);
+	        this.is_authority = source["is_authority"];
+	        this.roles = source["roles"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.status = source["status"];
+	        this.metadata = source["metadata"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -292,59 +308,24 @@ export namespace data {
 
 export namespace main {
 	
-	export class Peer {
-	    id: string;
-	    address: string;
-	    reputation: number;
-	    isConnected: boolean;
-	    lastSeen: string;
-	    roles: string[];
+	export class ServerStatus {
+	    running: boolean;
+	    databaseConnected: boolean;
+	    p2pHostRunning: boolean;
+	    scriptMgrRunning: boolean;
+	    embeddedDbRunning: boolean;
 	
 	    static createFrom(source: any = {}) {
-	        return new Peer(source);
+	        return new ServerStatus(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.address = source["address"];
-	        this.reputation = source["reputation"];
-	        this.isConnected = source["isConnected"];
-	        this.lastSeen = source["lastSeen"];
-	        this.roles = source["roles"];
-	    }
-	}
-	export class ScriptUploadData {
-	    name: string;
-	    dataType: string;
-	    content: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ScriptUploadData(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.dataType = source["dataType"];
-	        this.content = source["content"];
-	    }
-	}
-
-}
-
-export namespace scripts {
-	
-	export class ScriptExecutor {
-	
-	
-	    static createFrom(source: any = {}) {
-	        return new ScriptExecutor(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	
+	        this.running = source["running"];
+	        this.databaseConnected = source["databaseConnected"];
+	        this.p2pHostRunning = source["p2pHostRunning"];
+	        this.scriptMgrRunning = source["scriptMgrRunning"];
+	        this.embeddedDbRunning = source["embeddedDbRunning"];
 	    }
 	}
 

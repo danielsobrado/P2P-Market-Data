@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -267,7 +268,7 @@ type ExecutorStats struct {
 
 func validateConfig(config *config.ScriptConfig) error {
 	if config.PythonPath == "" {
-		return fmt.Errorf("python path not specified")
+		fmt.Println("Python path not set")
 	}
 	if config.MaxExecTime <= 0 {
 		return fmt.Errorf("invalid maximum execution time")
@@ -354,4 +355,58 @@ func (e *ScriptExecutor) StopScript(scriptID string) error {
     e.runningScripts.Delete(scriptID)
     e.logger.Info("Script stopped", zap.String("scriptID", scriptID))
     return nil
+}
+
+// Stop stops all running scripts and cleans up resources
+func (e *ScriptExecutor) Stop(ctx context.Context) error {
+    var errors []error
+
+    // Stop all running scripts
+    e.runningScripts.Range(func(key, value interface{}) bool {
+        scriptID := key.(string)
+        if err := e.StopScript(scriptID); err != nil {
+            e.logger.Error("Failed to stop script",
+                zap.String("scriptID", scriptID),
+                zap.Error(err))
+            errors = append(errors, err)
+        }
+        return true
+    })
+
+    if len(errors) > 0 {
+        return fmt.Errorf("failed to stop all scripts: %v", errors)
+    }
+
+    return nil
+}
+
+// findPythonPath attempts to find the Python interpreter path in a cross-platform way
+func findPythonPath(logger *zap.Logger) string {
+    // First, check if PYTHON_PATH environment variable is set
+    pythonPath := os.Getenv("PYTHON_PATH")
+    if pythonPath != "" {
+        return pythonPath
+    }
+
+    // Define possible executable names for Python
+    pythonExecs := []string{"python3", "python"}
+
+    // On Windows, executable may have .exe extension
+    if runtime.GOOS == "windows" {
+        for i, execName := range pythonExecs {
+            pythonExecs[i] = execName + ".exe"
+        }
+    }
+
+    // Look for each possible Python executable in the PATH
+    for _, execName := range pythonExecs {
+        path, err := exec.LookPath(execName)
+        if err == nil {
+            return path
+        }
+    }
+
+    // If Python is not found, log a warning and return empty string
+    logger.Warn("Python interpreter not found. Some features may be unavailable.")
+    return ""
 }
