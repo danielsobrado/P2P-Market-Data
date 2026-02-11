@@ -188,7 +188,6 @@ func (h *Host) Start(ctx context.Context) error {
 	h.mu.Unlock()
 
 	return nil
-	return nil
 }
 
 // Stop gracefully shuts down the P2P host
@@ -223,8 +222,6 @@ func (h *Host) Stop() error {
 	h.mu.Lock()
 	h.running = false
 	h.mu.Unlock()
-
-	h.logger.Info("P2P host stopped")
 
 	h.logger.Info("P2P host stopped")
 	return nil
@@ -599,4 +596,32 @@ func (h *Host) IsRunning() bool {
 
 	return h.running
 
+}
+
+func (h *Host) RequestData(ctx context.Context, peerID string, request data.DataRequest) error {
+	if h.networkMgr == nil {
+		return fmt.Errorf("network manager not initialized")
+	}
+	return h.networkMgr.RequestData(ctx, peerID, request)
+}
+
+func (h *Host) ResetConnection() error {
+	if h.networkMgr == nil {
+		return nil
+	}
+	return h.networkMgr.ResetConnection()
+}
+
+func (h *Host) ResetProcessing() error {
+	if h.networkMgr == nil {
+		return nil
+	}
+	return h.networkMgr.ResetProcessing()
+}
+
+func (h *Host) RetryConnection() error {
+	if h.networkMgr == nil {
+		return nil
+	}
+	return h.networkMgr.RetryConnection()
 }

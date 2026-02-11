@@ -2,7 +2,7 @@
 
 A decentralized platform for sharing and validating financial market data across a peer-to-peer network.
 
-Stil **WORK IN PROGRESS**
+Still **WORK IN PROGRESS**
 
 ## Overview
 
@@ -32,18 +32,18 @@ P2P Market Data enables secure, distributed sharing of financial market data bet
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/p2p_market_data.git
+git clone https://github.com/danielsobrado/p2p_market_data.git
 cd p2p_market_data
 
 # Install dependencies
 go mod download
 cd frontend && npm install
 
-# Setup database
-psql -U postgres -f db/schema.sql
+# Build frontend assets (required by Go embed)
+cd frontend && npm install && npm run build && cd ..
 
-# Configure environment
-cp .env.example .env
+# Setup database schema (if using external Postgres)
+for f in sql/schema/*.sql; do psql -U postgres -d market_data -f "$f"; done
 ```
 
 ## Usage
@@ -62,19 +62,12 @@ wails build
 ├── cmd/                    # Application entrypoints
 │   └── app/               # Main application
 ├── pkg/                   # Core packages
-│   ├── config/           # Configuration management 
-│   │   └── loader.go     # YAML config loader
-│   ├── data/             # Data persistence
-│   │   ├── models/       # Data models
-│   │   ├── postgres/     # PostgreSQL implementation
-│   │   └── repository.go # Repository interfaces
-│   ├── p2p/              # P2P networking
-│   │   ├── host/         # libp2p host implementation
-│   │   ├── message/      # P2P message definitions
-│   │   └── protocol/     # Protocol handlers
-│   ├── scheduler/        # Data collection scheduling
-│   ├── scripts/          # Data source scripts
-│   └── utils/            # Common utilities
+│   ├── config/            # Configuration management
+│   ├── data/              # Data models/repository/schema
+│   ├── database/          # Database service lifecycle
+│   ├── p2p/               # P2P networking (host/voting/authority)
+│   ├── scripts/           # Script execution and management
+│   └── utils/             # Common utilities
 └── frontend/             # React frontend
     ├── src/              # Frontend source code
     │   ├── components/   # React components

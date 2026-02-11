@@ -66,11 +66,11 @@ type DataSource struct {
 
 // DataRequest represents a request for data
 type DataRequest struct {
-	Type        string    `json:"type"`
-	Symbol      string    `json:"symbol"`
-	StartDate   time.Time `json:"start_date"`
-	EndDate     time.Time `json:"end_date"`
-	Granularity string    `json:"granularity"`
+	Type        string `json:"type"`
+	Symbol      string `json:"symbol"`
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	Granularity string `json:"granularity"`
 }
 
 // NewMarketData creates a new MarketData instance with validation

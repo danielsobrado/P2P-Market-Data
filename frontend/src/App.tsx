@@ -1,5 +1,5 @@
-import { SetStateAction, useEffect, useState } from "react"
-import DataManagement from "@/components/data/DataManagement"
+import { useEffect, useState } from "react"
+import { DataContainer } from "@/components/data/DataContainer"
 import PeerManagement from "@/components/peer/PeerManagement"
 import { ThemeProvider } from "./components/theme-provider"
 import { cn } from "@/lib/utils"
@@ -13,29 +13,31 @@ import {
   NavigationMenuList,
   NavigationMenuTrigger,
 } from "@/components/ui/navigation-menu"
-import { DataRequest } from "./types/marketData"
 
 function App() {
   const [isConnected, setIsConnected] = useState(false)
   const [activeView, setActiveView] = useState('data')
-  const [isPolling, setIsPolling] = useState(false)
-  const [data, setData] = useState<any[]>([])
 
   // Check connection status
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        // TODO: Implement proper connection check
-        setIsConnected(true)
+        if (window?.go?.main?.App?.CheckConnection) {
+          const connected = await window.go.main.App.CheckConnection()
+          setIsConnected(Boolean(connected))
+          return
+        }
+        setIsConnected(false)
       } catch (error) {
         console.error('Connection check failed:', error)
         setIsConnected(false)
       }
     }
     checkConnection()
+    const interval = setInterval(checkConnection, 5000)
+    return () => clearInterval(interval)
   }, [])
 
-  // Pass proper handlers to DataManagement
   return (
     <ThemeProvider defaultTheme="system" storageKey="ui-theme">
       <div className="min-h-screen bg-background">
@@ -83,27 +85,7 @@ function App() {
         
           <main>
             {activeView === 'data' && (
-            <DataManagement 
-              sources={[]}
-              transfers={[]}
-              searchResults={[]}
-              data={data}
-              setData={setData}
-              onSearch={async (request) => {
-                // TODO: Implement search
-                console.log('Search request:', request)
-              }}
-              onRequestData={async (peerId, request) => {
-                // TODO: Implement data request
-                console.log('Request data:', peerId, request)
-              }}
-              onClearSearch={() => {
-                // TODO: Implement clear search
-                console.log('Clear search')
-              }}
-              isLoading={false}
-              setPollingEnabled={setIsPolling}
-            />
+            <DataContainer />
           )}
           {activeView === 'peers' && <PeerManagement />}
         </main>

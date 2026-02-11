@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"p2p_market_data/pkg/config"
@@ -94,28 +95,158 @@ type PostgresRepository struct {
 
 // GetPeer implements Repository.
 func (r *PostgresRepository) GetPeer(ctx context.Context, id string) (*Peer, error) {
-	panic("unimplemented")
+	query := `
+		SELECT id, address, reputation, last_seen, roles, metadata, created_at, updated_at
+		FROM peers
+		WHERE id = $1
+	`
+
+	peer := &Peer{}
+	var metadataJSON []byte
+	err := r.conn.QueryRow(ctx, query, id).Scan(
+		&peer.ID,
+		&peer.Address,
+		&peer.Reputation,
+		&peer.LastSeen,
+		&peer.Roles,
+		&metadataJSON,
+		&peer.CreatedAt,
+		&peer.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("querying peer: %w", err)
+	}
+
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &peer.Metadata); err != nil {
+			return nil, fmt.Errorf("unmarshaling peer metadata: %w", err)
+		}
+	}
+
+	return peer, nil
 }
 
 // GetStake implements Repository.
 func (r *PostgresRepository) GetStake(ctx context.Context, id string) (*Stake, error) {
-	panic("unimplemented")
+	query := `
+		SELECT id, peer_id, amount, created_at, expires_at, status
+		FROM stakes
+		WHERE id = $1
+	`
+
+	stake := &Stake{}
+	err := r.conn.QueryRow(ctx, query, id).Scan(
+		&stake.ID,
+		&stake.PeerID,
+		&stake.Amount,
+		&stake.CreatedAt,
+		&stake.ExpiresAt,
+		&stake.Status,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("querying stake: %w", err)
+	}
+
+	return stake, nil
 }
 
 // GetStakesByPeer implements Repository.
 func (r *PostgresRepository) GetStakesByPeer(ctx context.Context, peerID string) ([]*Stake, error) {
-	panic("unimplemented")
+	return r.ListStakesByPeer(ctx, peerID)
 }
 
 // ListPeers implements Repository.
 func (r *PostgresRepository) ListPeers(ctx context.Context, filter PeerFilter) ([]*Peer, error) {
-	panic("unimplemented")
+	query := `
+		SELECT id, address, reputation, last_seen, roles, metadata, created_at, updated_at
+		FROM peers
+		WHERE 1=1
+	`
+
+	args := make([]interface{}, 0)
+	argCount := 1
+
+	if filter.MinReputation != nil {
+		query += fmt.Sprintf(" AND reputation >= $%d", argCount)
+		args = append(args, *filter.MinReputation)
+		argCount++
+	}
+	if filter.MaxReputation != nil {
+		query += fmt.Sprintf(" AND reputation <= $%d", argCount)
+		args = append(args, *filter.MaxReputation)
+		argCount++
+	}
+	if filter.Status != "" {
+		query += fmt.Sprintf(" AND COALESCE((metadata->>'status'),'') = $%d", argCount)
+		args = append(args, filter.Status)
+		argCount++
+	}
+	if len(filter.Roles) > 0 {
+		query += fmt.Sprintf(" AND roles && $%d", argCount)
+		args = append(args, filter.Roles)
+		argCount++
+	}
+
+	query += " ORDER BY reputation DESC, last_seen DESC"
+
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argCount)
+		args = append(args, filter.Limit)
+		argCount++
+	}
+	if filter.Offset > 0 {
+		query += fmt.Sprintf(" OFFSET $%d", argCount)
+		args = append(args, filter.Offset)
+	}
+
+	rows, err := r.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying peers: %w", err)
+	}
+	defer rows.Close()
+
+	peers := make([]*Peer, 0)
+	for rows.Next() {
+		peer := &Peer{}
+		var metadataJSON []byte
+		if err := rows.Scan(
+			&peer.ID,
+			&peer.Address,
+			&peer.Reputation,
+			&peer.LastSeen,
+			&peer.Roles,
+			&metadataJSON,
+			&peer.CreatedAt,
+			&peer.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning peer row: %w", err)
+		}
+
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &peer.Metadata); err != nil {
+				return nil, fmt.Errorf("unmarshaling peer metadata: %w", err)
+			}
+		}
+
+		peers = append(peers, peer)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating peer rows: %w", err)
+	}
+
+	return peers, nil
 }
 
 // SavePeer implements Repository.
 func (r *PostgresRepository) SavePeer(ctx context.Context, peer *Peer) error {
 	query := `
-        INSERT INTO peers (id, address, reputation, last_seen, roles, metadata)
+	        INSERT INTO peers (id, address, reputation, last_seen, roles, metadata)
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (id) DO UPDATE SET
             address = EXCLUDED.address,
@@ -125,13 +256,18 @@ func (r *PostgresRepository) SavePeer(ctx context.Context, peer *Peer) error {
             metadata = EXCLUDED.metadata
     `
 
-	_, err := r.conn.Exec(ctx, query,
+	metadataJSON, err := json.Marshal(peer.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshaling peer metadata: %w", err)
+	}
+
+	_, err = r.conn.Exec(ctx, query,
 		peer.ID,
 		peer.Address,
 		peer.Reputation,
 		peer.LastSeen,
 		peer.Roles,
-		peer.Metadata,
+		metadataJSON,
 	)
 
 	if err != nil {
@@ -143,77 +279,77 @@ func (r *PostgresRepository) SavePeer(ctx context.Context, peer *Peer) error {
 
 // SaveStake saves a new stake to the database
 func (r *PostgresRepository) SaveStake(ctx context.Context, stake *Stake) error {
-    query := `
-        INSERT INTO stakes (id, peer_id, amount, created_at, expires_at, status)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (id) DO NOTHING
-    `
+	query := `
+	        INSERT INTO stakes (id, peer_id, amount, created_at, expires_at, status)
+	        VALUES ($1, $2, $3, $4, $5, $6)
+	        ON CONFLICT (id) DO NOTHING
+	    `
 
-    _, err := r.pool.Exec(ctx, query,
-        stake.ID,
-        stake.PeerID,
-        stake.Amount,
-        stake.CreatedAt,
-        stake.ExpiresAt,
-        stake.Status,
-    )
-    if err != nil {
-        return fmt.Errorf("saving stake: %w", err)
-    }
-    return nil
+	_, err := r.conn.Exec(ctx, query,
+		stake.ID,
+		stake.PeerID,
+		stake.Amount,
+		stake.CreatedAt,
+		stake.ExpiresAt,
+		stake.Status,
+	)
+	if err != nil {
+		return fmt.Errorf("saving stake: %w", err)
+	}
+	return nil
 }
 
 // UpdatePeer updates an existing peer in the database
 func (r *PostgresRepository) UpdatePeer(ctx context.Context, peer *Peer) error {
-    query := `
-        UPDATE peers SET
-            address = $2,
-            reputation = $3,
+	query := `
+	        UPDATE peers SET
+	            address = $2,
+	            reputation = $3,
             last_seen = $4,
             roles = $5,
             metadata = $6
         WHERE id = $1
     `
 
-    metadataJSON, err := json.Marshal(peer.Metadata)
-    if err != nil {
-        return fmt.Errorf("marshaling metadata: %w", err)
-    }
+	metadataJSON, err := json.Marshal(peer.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshaling metadata: %w", err)
+	}
 
-    _, err = r.pool.Exec(ctx, query,
-        peer.ID,
-        peer.Address,
-        peer.Reputation,
-        peer.LastSeen,
-        peer.Roles,
-        metadataJSON,
-    )
-    if err != nil {
-        return fmt.Errorf("updating peer: %w", err)
-    }
-    return nil
+	_, err = r.conn.Exec(ctx, query,
+		peer.ID,
+		peer.Address,
+		peer.Reputation,
+		peer.LastSeen,
+		peer.Roles,
+		metadataJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("updating peer: %w", err)
+	}
+	return nil
 }
 
 // UpdateStake updates an existing stake in the database
 func (r *PostgresRepository) UpdateStake(ctx context.Context, stake *Stake) error {
-    query := `
-        UPDATE stakes SET
-            amount = $2,
-            expires_at = $3,
+	query := `
+	        UPDATE stakes SET
+	            amount = $2,
+	            expires_at = $3,
             status = $4
         WHERE id = $1
     `
 
-    _, err := r.pool.Exec(ctx, query,
-        stake.ID,
-        stake.Amount,
-        stake.ExpiresAt,
-        stake.Status,
-    )
-    if err != nil {
-        return fmt.Errorf("updating stake: %w", err)
-    }
-    return nil
+	_, err := r.conn.Exec(ctx, query,
+		stake.ID,
+		stake.Amount,
+		stake.ExpiresAt,
+		stake.Status,
+	)
+	if err != nil {
+		return fmt.Errorf("updating stake: %w", err)
+	}
+	return nil
 }
 
 // NewPostgresRepository creates a new PostgreSQL repository instance
@@ -248,6 +384,9 @@ func NewPostgresRepository(ctx context.Context, conn *pgx.Conn, logger *zap.Logg
 
 // Close releases all database resources
 func (r *PostgresRepository) Close(ctx context.Context) {
+	if r.pool != nil {
+		r.pool.Close()
+	}
 	r.conn.Close(ctx)
 }
 
@@ -258,16 +397,25 @@ func (r *PostgresRepository) SaveMarketData(ctx context.Context, data *MarketDat
 	}
 
 	query := `
-		INSERT INTO market_data (
-			id, symbol, price, volume, timestamp, source, data_type,
-			signatures, metadata, validation_score, hash, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-		)`
+			INSERT INTO market_data (
+				id, symbol, price, volume, timestamp, source, data_type,
+				signatures, metadata, validation_score, hash, created_at, updated_at
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			)`
+
+	signaturesJSON, err := json.Marshal(data.Signatures)
+	if err != nil {
+		return fmt.Errorf("marshaling signatures: %w", err)
+	}
+	metadataJSON, err := json.Marshal(data.MetaData)
+	if err != nil {
+		return fmt.Errorf("marshaling metadata: %w", err)
+	}
 
 	_, err := r.conn.Exec(ctx, query,
 		data.ID, data.Symbol, data.Price, data.Volume, data.Timestamp,
-		data.Source, data.DataType, data.Signatures, data.MetaData,
+		data.Source, data.DataType, signaturesJSON, metadataJSON,
 		data.ValidationScore, data.Hash, data.CreatedAt, data.UpdatedAt,
 	)
 
@@ -290,9 +438,11 @@ func (r *PostgresRepository) GetMarketData(ctx context.Context, id string) (*Mar
 		WHERE id = $1`
 
 	data := &MarketData{}
+	var signaturesJSON []byte
+	var metadataJSON []byte
 	err := r.conn.QueryRow(ctx, query, id).Scan(
 		&data.ID, &data.Symbol, &data.Price, &data.Volume, &data.Timestamp,
-		&data.Source, &data.DataType, &data.Signatures, &data.MetaData,
+		&data.Source, &data.DataType, &signaturesJSON, &metadataJSON,
 		&data.ValidationScore, &data.Hash, &data.CreatedAt, &data.UpdatedAt,
 	)
 
@@ -301,6 +451,17 @@ func (r *PostgresRepository) GetMarketData(ctx context.Context, id string) (*Mar
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("querying market data: %w", err)
+	}
+
+	if len(signaturesJSON) > 0 {
+		if err := json.Unmarshal(signaturesJSON, &data.Signatures); err != nil {
+			return nil, fmt.Errorf("unmarshaling signatures: %w", err)
+		}
+	}
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &data.MetaData); err != nil {
+			return nil, fmt.Errorf("unmarshaling metadata: %w", err)
+		}
 	}
 
 	return data, nil
@@ -384,13 +545,25 @@ func (r *PostgresRepository) ListMarketData(ctx context.Context, filter MarketDa
 	var results []*MarketData
 	for rows.Next() {
 		data := &MarketData{}
+		var signaturesJSON []byte
+		var metadataJSON []byte
 		err := rows.Scan(
 			&data.ID, &data.Symbol, &data.Price, &data.Volume, &data.Timestamp,
-			&data.Source, &data.DataType, &data.Signatures, &data.MetaData,
+			&data.Source, &data.DataType, &signaturesJSON, &metadataJSON,
 			&data.ValidationScore, &data.Hash, &data.CreatedAt, &data.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning market data row: %w", err)
+		}
+		if len(signaturesJSON) > 0 {
+			if err := json.Unmarshal(signaturesJSON, &data.Signatures); err != nil {
+				return nil, fmt.Errorf("unmarshaling signatures: %w", err)
+			}
+		}
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &data.MetaData); err != nil {
+				return nil, fmt.Errorf("unmarshaling metadata: %w", err)
+			}
 		}
 		results = append(results, data)
 	}
@@ -409,15 +582,24 @@ func (r *PostgresRepository) UpdateMarketData(ctx context.Context, data *MarketD
 	}
 
 	query := `
-			UPDATE market_data
-			SET symbol = $1, price = $2, volume = $3, timestamp = $4,
-				source = $5, data_type = $6, signatures = $7, metadata = $8,
-				validation_score = $9, hash = $10, updated_at = $11
-			WHERE id = $12`
+				UPDATE market_data
+				SET symbol = $1, price = $2, volume = $3, timestamp = $4,
+					source = $5, data_type = $6, signatures = $7, metadata = $8,
+					validation_score = $9, hash = $10, updated_at = $11
+				WHERE id = $12`
+
+	signaturesJSON, err := json.Marshal(data.Signatures)
+	if err != nil {
+		return fmt.Errorf("marshaling signatures: %w", err)
+	}
+	metadataJSON, err := json.Marshal(data.MetaData)
+	if err != nil {
+		return fmt.Errorf("marshaling metadata: %w", err)
+	}
 
 	result, err := r.conn.Exec(ctx, query,
 		data.Symbol, data.Price, data.Volume, data.Timestamp,
-		data.Source, data.DataType, data.Signatures, data.MetaData,
+		data.Source, data.DataType, signaturesJSON, metadataJSON,
 		data.ValidationScore, data.Hash, time.Now().UTC(), data.ID,
 	)
 
@@ -501,31 +683,109 @@ func (r *PostgresRepository) GetVotesByValidator(ctx context.Context, validatorI
 
 // GetInsiderData retrieves insider trade data based on symbol and date range
 func (r *PostgresRepository) GetInsiderData(ctx context.Context, symbol, startDate, endDate string) ([]InsiderTrade, error) {
-	// TODO: Implement actual database query
-	return nil, nil
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start date: %w", err)
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end date: %w", err)
+	}
+
+	query := `
+		SELECT symbol, trade_date, insider_name, insider_title, transaction_type, shares, price_per_share, value
+		FROM insider_trades
+		WHERE symbol = $1 AND trade_date BETWEEN $2 AND $3
+		ORDER BY trade_date DESC
+	`
+
+	rows, err := r.conn.Query(ctx, query, symbol, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("querying insider trades: %w", err)
+	}
+	defer rows.Close()
+
+	results := make([]InsiderTrade, 0)
+	for rows.Next() {
+		item := InsiderTrade{
+			MarketDataBase: MarketDataBase{
+				ID:       "",
+				Symbol:   symbol,
+				DataType: DataTypeInsiderTrade,
+			},
+		}
+		if err := rows.Scan(
+			&item.Symbol,
+			&item.TradeDate,
+			&item.InsiderName,
+			&item.InsiderTitle,
+			&item.TransactionType,
+			&item.Shares,
+			&item.PricePerShare,
+			&item.Value,
+		); err != nil {
+			return nil, fmt.Errorf("scanning insider trade: %w", err)
+		}
+		results = append(results, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating insider trades: %w", err)
+	}
+
+	return results, nil
 }
 
 // CreateStake creates a new stake record in the database
 func (r *PostgresRepository) CreateStake(ctx context.Context, stake *Stake) error {
-	// TODO: Implement actual database query
-	panic("unimplemented")
+	return r.SaveStake(ctx, stake)
 }
 
 // ListStakesByPeer retrieves all stakes for a specific peer
 func (r *PostgresRepository) ListStakesByPeer(ctx context.Context, peerID string) ([]*Stake, error) {
-	// TODO: Implement actual database query
-	panic("unimplemented")
+	query := `
+		SELECT id, peer_id, amount, created_at, expires_at, status
+		FROM stakes
+		WHERE peer_id = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.conn.Query(ctx, query, peerID)
+	if err != nil {
+		return nil, fmt.Errorf("querying stakes: %w", err)
+	}
+	defer rows.Close()
+
+	stakes := make([]*Stake, 0)
+	for rows.Next() {
+		stake := &Stake{}
+		if err := rows.Scan(
+			&stake.ID,
+			&stake.PeerID,
+			&stake.Amount,
+			&stake.CreatedAt,
+			&stake.ExpiresAt,
+			&stake.Status,
+		); err != nil {
+			return nil, fmt.Errorf("scanning stake: %w", err)
+		}
+		stakes = append(stakes, stake)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating stakes: %w", err)
+	}
+
+	return stakes, nil
 }
 
 // GetDividendData retrieves dividend data based on symbol and date range
 func (r *PostgresRepository) GetDividendData(ctx context.Context, symbol string, startDate, endDate time.Time) ([]*DividendData, error) {
 	query := `
-        SELECT id, symbol, ex_date, payment_date, record_date, declared_date, amount, source,
-               currency, frequency, metadata, created_at, updated_at
-        FROM dividends
-        WHERE symbol = $1 AND ex_date BETWEEN $2 AND $3
-        ORDER BY ex_date ASC
-    `
+	        SELECT id, symbol, ex_date, payment_date, record_date, declared_date, amount, source,
+	               currency, frequency, metadata
+	        FROM dividends
+	        WHERE symbol = $1 AND ex_date BETWEEN $2 AND $3
+	        ORDER BY ex_date ASC
+	    `
 
 	rows, err := r.pool.Query(ctx, query, symbol, startDate, endDate)
 	if err != nil {
@@ -571,14 +831,104 @@ func (r *PostgresRepository) GetDividendData(ctx context.Context, symbol string,
 
 // SearchData implements the Repository interface for searching data sources
 func (r *PostgresRepository) SearchData(ctx context.Context, request DataRequest) ([]DataSource, error) {
-	// TODO: Implement actual database query
-	return nil, nil
+	// Search currently maps to available data sources; request shape is retained for API compatibility.
+	sources, err := r.GetDataSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if request.Symbol == "" && request.Type == "" {
+		return sources, nil
+	}
+
+	filtered := make([]DataSource, 0, len(sources))
+	for _, source := range sources {
+		typeMatch := request.Type == ""
+		symbolMatch := request.Symbol == ""
+
+		for _, t := range source.DataTypes {
+			if t == request.Type {
+				typeMatch = true
+				break
+			}
+		}
+		for _, s := range source.AvailableSymbols {
+			if s == request.Symbol {
+				symbolMatch = true
+				break
+			}
+		}
+
+		if typeMatch && symbolMatch {
+			filtered = append(filtered, source)
+		}
+	}
+
+	return filtered, nil
 }
 
 // GetEODData retrieves end-of-day data based on symbol and date range
 func (r *PostgresRepository) GetEODData(ctx context.Context, symbol, startDate, endDate string) ([]EODData, error) {
-	// TODO: Implement actual database query
-	return nil, nil
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start date: %w", err)
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end date: %w", err)
+	}
+
+	query := `
+		SELECT id, symbol, timestamp, source, data_type, validation_score, metadata
+		FROM market_data
+		WHERE symbol = $1 AND data_type = $2 AND timestamp BETWEEN $3 AND $4
+		ORDER BY timestamp ASC
+	`
+
+	rows, err := r.conn.Query(ctx, query, symbol, DataTypeEOD, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("querying EOD data: %w", err)
+	}
+	defer rows.Close()
+
+	results := make([]EODData, 0)
+	for rows.Next() {
+		var item EODData
+		var metadataJSON []byte
+		if err := rows.Scan(
+			&item.ID,
+			&item.Symbol,
+			&item.Timestamp,
+			&item.Source,
+			&item.DataType,
+			&item.ValidationScore,
+			&metadataJSON,
+		); err != nil {
+			return nil, fmt.Errorf("scanning EOD row: %w", err)
+		}
+
+		meta := map[string]string{}
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &meta); err != nil {
+				return nil, fmt.Errorf("unmarshaling EOD metadata: %w", err)
+			}
+		}
+		item.Open = parseFloat(meta["open"])
+		item.High = parseFloat(meta["high"])
+		item.Low = parseFloat(meta["low"])
+		item.Close = parseFloat(meta["close"])
+		item.AdjustedClose = parseFloat(meta["adjusted_close"])
+		item.Volume = parseFloat(meta["volume"])
+		item.Date = item.Timestamp
+		item.Metadata = meta
+
+		results = append(results, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating EOD rows: %w", err)
+	}
+
+	return results, nil
 }
 
 // Helper function to query votes
@@ -638,8 +988,20 @@ func NewRepository(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
+	poolConfig, err := pgxpool.ParseConfig(cfg.URL)
+	if err != nil {
+		conn.Close(ctx)
+		return nil, fmt.Errorf("failed to parse pool config: %w", err)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		conn.Close(ctx)
+		return nil, fmt.Errorf("failed to create pool: %w", err)
+	}
+
 	repo := &PostgresRepository{
 		conn:   conn,
+		pool:   pool,
 		logger: logger,
 	}
 
@@ -697,4 +1059,65 @@ func (r *PostgresRepository) SaveDividendData(ctx context.Context, dividend *Div
 		return fmt.Errorf("saving dividend data: %w", err)
 	}
 	return nil
+}
+
+// GetDataSources retrieves currently known data sources from peers.
+func (r *PostgresRepository) GetDataSources(ctx context.Context) ([]DataSource, error) {
+	query := `
+		SELECT id, reputation, roles, metadata, last_seen
+		FROM peers
+		ORDER BY reputation DESC, last_seen DESC
+	`
+
+	rows, err := r.conn.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("querying data sources: %w", err)
+	}
+	defer rows.Close()
+
+	sources := make([]DataSource, 0)
+	for rows.Next() {
+		var id string
+		var reputation float64
+		var roles []string
+		var metadataJSON []byte
+		var lastSeen time.Time
+		if err := rows.Scan(&id, &reputation, &roles, &metadataJSON, &lastSeen); err != nil {
+			return nil, fmt.Errorf("scanning data source: %w", err)
+		}
+
+		meta := map[string]interface{}{}
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &meta); err != nil {
+				return nil, fmt.Errorf("unmarshaling source metadata: %w", err)
+			}
+		}
+
+		source := DataSource{
+			ID:               id,
+			PeerID:           id,
+			Reputation:       reputation,
+			DataTypes:        roles,
+			AvailableSymbols: []string{},
+			LastUpdate:       lastSeen,
+			Reliability:      reputation,
+		}
+		sources = append(sources, source)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating data sources: %w", err)
+	}
+
+	return sources, nil
+}
+
+func parseFloat(value string) float64 {
+	if value == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0
+	}
+	return f
 }

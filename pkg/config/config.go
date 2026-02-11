@@ -151,7 +151,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Database defaults
 	v.SetDefault("database.type", "postgres")
+	v.SetDefault("database.url", "postgres://postgres:postgres@localhost:5433/market_data?sslmode=disable")
 	v.SetDefault("database.max_conns", 10)
+	v.SetDefault("database.min_conns", 2)
 	v.SetDefault("database.timeout", "30s")
 	v.SetDefault("database.ssl_mode", "disable")
 }

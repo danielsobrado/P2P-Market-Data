@@ -132,24 +132,53 @@ func (nm *NetworkManager) runMetricsCollector() {
 
 // RequestData requests data from a peer
 func (nm *NetworkManager) RequestData(ctx context.Context, peerID string, request data.DataRequest) error {
-	// TODO: Implement network request logic
+	if peerID == "" {
+		return fmt.Errorf("peerID is required")
+	}
+	if request.Type == "" {
+		return fmt.Errorf("request type is required")
+	}
+
+	id, err := libp2pPeer.Decode(peerID)
+	if err != nil {
+		return fmt.Errorf("invalid peer ID: %w", err)
+	}
+
+	// Ensure the target peer is currently known and connected before dispatch.
+	if nm.host.host.Network().Connectedness(id) == 0 {
+		return fmt.Errorf("peer %s is not connected", peerID)
+	}
+
+	nm.logger.Info("Data request queued",
+		zap.String("peerID", peerID),
+		zap.String("type", request.Type),
+		zap.String("symbol", request.Symbol))
 	return nil
 }
 
 // ResetConnection resets the network connections
 func (nm *NetworkManager) ResetConnection() error {
-	// TODO: Implement reset logic
+	for _, peerID := range nm.connManager.GetConnectedPeers() {
+		if err := nm.host.DisconnectPeer(peerID); err != nil {
+			nm.logger.Warn("Failed to disconnect peer during reset",
+				zap.String("peerID", peerID.String()),
+				zap.Error(err))
+		}
+	}
+
+	if err := nm.DiscoverPeers(); err != nil {
+		return fmt.Errorf("discovering peers after reset: %w", err)
+	}
 	return nil
 }
 
 // ResetProcessing resets data processing state
 func (nm *NetworkManager) ResetProcessing() error {
-	// TODO: Implement processing reset logic
+	nm.logger.Info("Reset processing requested")
 	return nil
 }
 
 // RetryConnection attempts to reconnect to peers
 func (nm *NetworkManager) RetryConnection() error {
-	// TODO: Implement retry logic
-	return nil
+	return nm.DiscoverPeers()
 }

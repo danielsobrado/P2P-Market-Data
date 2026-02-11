@@ -1,4 +1,3 @@
- 
 package config
 
 import (
@@ -15,29 +14,31 @@ func TestLoad(t *testing.T) {
 	// Create a temporary config file
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
-	
+
 	configContent := []byte(`
-		environment: production
-		log_level: debug
-		p2p:
-		port: 9001
-		max_peers: 100
-		min_peers: 10
-		peer_timeout: 1m
-		validation_quorum: 0.75
-		scripts:
-		script_dir: test_scripts
-		max_exec_time: 10m
-		max_memory_mb: 1024
-		scheduler:
-		max_concurrent: 5
-		default_interval: 1m
-		retry_attempts: 3
-		security:
-		min_reputation_score: 0.6
-		max_penalty: 0.8
-		token_expiry: 12h
-		`)
+			environment: production
+			log_level: debug
+			p2p:
+			  port: 9001
+			  max_peers: 100
+			  min_peers: 10
+			  peer_timeout: 1m
+			  validation_quorum: 0.75
+			scripts:
+			  script_dir: test_scripts
+			  max_exec_time: 10m
+			  max_memory_mb: 1024
+			scheduler:
+			  max_concurrent: 5
+			  default_interval: 1m
+			  retry_attempts: 3
+			security:
+			  min_reputation_score: 0.6
+			  max_penalty: 0.8
+			  token_expiry: 12h
+			database:
+			  url: postgres://postgres:postgres@localhost:5433/market_data?sslmode=disable
+			`)
 
 	err := os.WriteFile(configPath, configContent, 0644)
 	require.NoError(t, err)
@@ -92,22 +93,22 @@ func TestLoad(t *testing.T) {
 
 func TestConfigValidation(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		modifyConfig func(*Config)
-		wantErr     bool
-		errSubstr   string
+		wantErr      bool
+		errSubstr    string
 	}{
 		{
-			name: "ValidConfig",
+			name:         "ValidConfig",
 			modifyConfig: func(c *Config) {},
-			wantErr: false,
+			wantErr:      false,
 		},
 		{
 			name: "InvalidPort",
 			modifyConfig: func(c *Config) {
 				c.P2P.Port = -1
 			},
-			wantErr: true,
+			wantErr:   true,
 			errSubstr: "invalid port number",
 		},
 		{
@@ -116,7 +117,7 @@ func TestConfigValidation(t *testing.T) {
 				c.P2P.MaxPeers = 5
 				c.P2P.MinPeers = 10
 			},
-			wantErr: true,
+			wantErr:   true,
 			errSubstr: "max_peers",
 		},
 		{
@@ -124,7 +125,7 @@ func TestConfigValidation(t *testing.T) {
 			modifyConfig: func(c *Config) {
 				c.P2P.ValidationQuorum = 1.5
 			},
-			wantErr: true,
+			wantErr:   true,
 			errSubstr: "validation_quorum",
 		},
 		{
@@ -132,7 +133,7 @@ func TestConfigValidation(t *testing.T) {
 			modifyConfig: func(c *Config) {
 				c.Scripts.MaxMemoryMB = -1
 			},
-			wantErr: true,
+			wantErr:   true,
 			errSubstr: "max_memory_mb",
 		},
 		{
@@ -140,7 +141,7 @@ func TestConfigValidation(t *testing.T) {
 			modifyConfig: func(c *Config) {
 				c.Security.MinReputationScore = 1.5
 			},
-			wantErr: true,
+			wantErr:   true,
 			errSubstr: "min_reputation_score",
 		},
 	}
@@ -149,20 +150,20 @@ func TestConfigValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
 				Environment: "test",
-				LogLevel: "info",
+				LogLevel:    "info",
 				P2P: P2PConfig{
-					Port: 9000,
-					MaxPeers: 50,
-					MinPeers: 3,
+					Port:             9000,
+					MaxPeers:         50,
+					MinPeers:         3,
 					ValidationQuorum: 0.66,
 				},
 				Scripts: ScriptConfig{
-					ScriptDir: "scripts",
+					ScriptDir:   "scripts",
 					MaxMemoryMB: 512,
 				},
 				Security: SecurityConfig{
 					MinReputationScore: 0.5,
-					MaxPenalty: 0.8,
+					MaxPenalty:         0.8,
 				},
 			}
 
@@ -307,12 +308,12 @@ func TestConfigFile(t *testing.T) {
 func TestLoadWithEnvVars(t *testing.T) {
 	// Setup environment variables
 	envVars := map[string]string{
-		"P2P_ENVIRONMENT":                    "production",
-		"P2P_LOG_LEVEL":                      "debug",
-		"P2P_P2P_PORT":                       "9002",
-		"P2P_P2P_MAX_PEERS":                  "150",
-		"P2P_SCRIPTS_MAX_MEMORY_MB":          "2048",
-		"P2P_SECURITY_MIN_REPUTATION_SCORE":  "0.7",
+		"P2P_ENVIRONMENT":                   "production",
+		"P2P_LOG_LEVEL":                     "debug",
+		"P2P_P2P_PORT":                      "9002",
+		"P2P_P2P_MAX_PEERS":                 "150",
+		"P2P_SCRIPTS_MAX_MEMORY_MB":         "2048",
+		"P2P_SECURITY_MIN_REPUTATION_SCORE": "0.7",
 	}
 
 	// Set environment variables
@@ -347,10 +348,10 @@ func TestLoadWithEnvVars(t *testing.T) {
 
 func TestValidationEdgeCases(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		modifyConfig func(*Config)
-		wantErr     bool
-		errSubstr   string
+		wantErr      bool
+		errSubstr    string
 	}{
 		{
 			name: "ZeroValues",

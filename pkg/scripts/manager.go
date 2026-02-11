@@ -120,11 +120,6 @@ func (m *ScriptManager) AddScript(name string, content []byte, metadata *ScriptM
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Validate script content
-	if err := m.Executor.validateScript(name); err != nil {
-		return fmt.Errorf("invalid script: %w", err)
-	}
-
 	// Generate script ID and hash
 	hash := sha256.Sum256(content)
 	scriptID := hex.EncodeToString(hash[:])
@@ -138,6 +133,10 @@ func (m *ScriptManager) AddScript(name string, content []byte, metadata *ScriptM
 	scriptPath := filepath.Join(m.Config.ScriptDir, name)
 	if err := os.WriteFile(scriptPath, content, 0644); err != nil {
 		return fmt.Errorf("writing script file: %w", err)
+	}
+	if err := m.Executor.validateScript(scriptPath); err != nil {
+		_ = os.Remove(scriptPath)
+		return fmt.Errorf("invalid script: %w", err)
 	}
 
 	// Update metadata
@@ -181,19 +180,17 @@ func (m *ScriptManager) UpdateScript(scriptID string, content []byte) error {
 	}
 
 	// Validate new content
-	if err := m.Executor.validateScript(script.Name); err != nil {
+	scriptPath := filepath.Join(m.Config.ScriptDir, script.Name)
+	if err := os.WriteFile(scriptPath, content, 0644); err != nil {
+		return fmt.Errorf("writing updated script: %w", err)
+	}
+	if err := m.Executor.validateScript(scriptPath); err != nil {
 		return fmt.Errorf("invalid script content: %w", err)
 	}
 
 	// Generate new hash
 	hash := sha256.Sum256(content)
 	newHash := hex.EncodeToString(hash[:])
-
-	// Update script file
-	scriptPath := filepath.Join(m.Config.ScriptDir, script.Name)
-	if err := os.WriteFile(scriptPath, content, 0644); err != nil {
-		return fmt.Errorf("writing updated script: %w", err)
-	}
 
 	// Update metadata
 	script.Hash = newHash

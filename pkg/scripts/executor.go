@@ -33,10 +33,10 @@ type ExecutionResult struct {
 
 // ScriptExecutor handles script execution with resource limits
 type ScriptExecutor struct {
-	config        *config.ScriptConfig
-	logger        *zap.Logger
-	metrics       *ExecutorMetrics
-	processMap    sync.Map // maps script IDs to running processes
+	config         *config.ScriptConfig
+	logger         *zap.Logger
+	metrics        *ExecutorMetrics
+	processMap     sync.Map // maps script IDs to running processes
 	runningScripts sync.Map // tracks running scripts by ID
 }
 
@@ -117,18 +117,19 @@ func (e *ScriptExecutor) runScript(ctx context.Context, scriptPath string, args 
 	cmd.Stderr = &stderr
 
 	// Set resource limits
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-	}
-
-	// Store process for potential cancellation
-	e.processMap.Store(scriptPath, cmd.Process)
-	defer e.processMap.Delete(scriptPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
 
 	e.runningScripts.Store(scriptPath, cmd)
 	defer e.runningScripts.Delete(scriptPath)
 
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting script: %w", err)
+	}
+	e.processMap.Store(scriptPath, cmd.Process)
+	defer e.processMap.Delete(scriptPath)
+
 	// Run script
-	err := cmd.Run()
+	err := cmd.Wait()
 
 	// Prepare result
 	result := &ExecutionResult{
@@ -268,7 +269,7 @@ type ExecutorStats struct {
 
 func validateConfig(config *config.ScriptConfig) error {
 	if config.PythonPath == "" {
-		fmt.Println("Python path not set")
+		return fmt.Errorf("python path not set")
 	}
 	if config.MaxExecTime <= 0 {
 		return fmt.Errorf("invalid maximum execution time")
@@ -322,91 +323,91 @@ func (e *ScriptExecutor) ExecuteScriptWithOutputCapture(ctx context.Context, scr
 
 // StopScript stops a running script by ID
 func (e *ScriptExecutor) StopScript(scriptID string) error {
-    value, exists := e.runningScripts.Load(scriptID)
-    if !exists {
-        return fmt.Errorf("script %s is not running", scriptID)
-    }
+	value, exists := e.runningScripts.Load(scriptID)
+	if !exists {
+		return fmt.Errorf("script %s is not running", scriptID)
+	}
 
-    cmd := value.(*exec.Cmd)
-    if cmd == nil || cmd.Process == nil {
-        e.runningScripts.Delete(scriptID)
-        return nil
-    }
+	cmd := value.(*exec.Cmd)
+	if cmd == nil || cmd.Process == nil {
+		e.runningScripts.Delete(scriptID)
+		return nil
+	}
 
-    // Try graceful shutdown first
-    if err := cmd.Process.Signal(os.Interrupt); err != nil {
-        e.logger.Warn("Failed to send interrupt signal", 
-            zap.String("scriptID", scriptID),
-            zap.Error(err))
-        
-        // Force kill if graceful shutdown fails
-        if err := cmd.Process.Kill(); err != nil {
-            return fmt.Errorf("failed to kill script: %w", err)
-        }
-    }
+	// Try graceful shutdown first
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		e.logger.Warn("Failed to send interrupt signal",
+			zap.String("scriptID", scriptID),
+			zap.Error(err))
 
-    // Wait for process to exit
-    if err := cmd.Wait(); err != nil {
-        if _, ok := err.(*exec.ExitError); !ok {
-            return fmt.Errorf("error waiting for script to stop: %w", err)
-        }
-    }
+		// Force kill if graceful shutdown fails
+		if err := cmd.Process.Kill(); err != nil {
+			return fmt.Errorf("failed to kill script: %w", err)
+		}
+	}
 
-    e.runningScripts.Delete(scriptID)
-    e.logger.Info("Script stopped", zap.String("scriptID", scriptID))
-    return nil
+	// Wait for process to exit
+	if err := cmd.Wait(); err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			return fmt.Errorf("error waiting for script to stop: %w", err)
+		}
+	}
+
+	e.runningScripts.Delete(scriptID)
+	e.logger.Info("Script stopped", zap.String("scriptID", scriptID))
+	return nil
 }
 
 // Stop stops all running scripts and cleans up resources
 func (e *ScriptExecutor) Stop(ctx context.Context) error {
-    var errors []error
+	var errors []error
 
-    // Stop all running scripts
-    e.runningScripts.Range(func(key, value interface{}) bool {
-        scriptID := key.(string)
-        if err := e.StopScript(scriptID); err != nil {
-            e.logger.Error("Failed to stop script",
-                zap.String("scriptID", scriptID),
-                zap.Error(err))
-            errors = append(errors, err)
-        }
-        return true
-    })
+	// Stop all running scripts
+	e.runningScripts.Range(func(key, value interface{}) bool {
+		scriptID := key.(string)
+		if err := e.StopScript(scriptID); err != nil {
+			e.logger.Error("Failed to stop script",
+				zap.String("scriptID", scriptID),
+				zap.Error(err))
+			errors = append(errors, err)
+		}
+		return true
+	})
 
-    if len(errors) > 0 {
-        return fmt.Errorf("failed to stop all scripts: %v", errors)
-    }
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to stop all scripts: %v", errors)
+	}
 
-    return nil
+	return nil
 }
 
 // findPythonPath attempts to find the Python interpreter path in a cross-platform way
 func findPythonPath(logger *zap.Logger) string {
-    // First, check if PYTHON_PATH environment variable is set
-    pythonPath := os.Getenv("PYTHON_PATH")
-    if pythonPath != "" {
-        return pythonPath
-    }
+	// First, check if PYTHON_PATH environment variable is set
+	pythonPath := os.Getenv("PYTHON_PATH")
+	if pythonPath != "" {
+		return pythonPath
+	}
 
-    // Define possible executable names for Python
-    pythonExecs := []string{"python3", "python"}
+	// Define possible executable names for Python
+	pythonExecs := []string{"python3", "python"}
 
-    // On Windows, executable may have .exe extension
-    if runtime.GOOS == "windows" {
-        for i, execName := range pythonExecs {
-            pythonExecs[i] = execName + ".exe"
-        }
-    }
+	// On Windows, executable may have .exe extension
+	if runtime.GOOS == "windows" {
+		for i, execName := range pythonExecs {
+			pythonExecs[i] = execName + ".exe"
+		}
+	}
 
-    // Look for each possible Python executable in the PATH
-    for _, execName := range pythonExecs {
-        path, err := exec.LookPath(execName)
-        if err == nil {
-            return path
-        }
-    }
+	// Look for each possible Python executable in the PATH
+	for _, execName := range pythonExecs {
+		path, err := exec.LookPath(execName)
+		if err == nil {
+			return path
+		}
+	}
 
-    // If Python is not found, log a warning and return empty string
-    logger.Warn("Python interpreter not found. Some features may be unavailable.")
-    return ""
+	// If Python is not found, log a warning and return empty string
+	logger.Warn("Python interpreter not found. Some features may be unavailable.")
+	return ""
 }

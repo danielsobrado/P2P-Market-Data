@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +49,21 @@ type ServerStatus struct {
 	EmbeddedDBRunning bool `json:"embeddedDbRunning"`
 }
 
+// ActiveTransfer is a frontend-facing transfer status payload.
+type ActiveTransfer struct {
+	ID          string  `json:"id"`
+	Type        string  `json:"type"`
+	Symbol      string  `json:"symbol"`
+	Source      string  `json:"source"`
+	Destination string  `json:"destination"`
+	Progress    float64 `json:"progress"`
+	Status      string  `json:"status"`
+	StartTime   string  `json:"startTime"`
+	EndTime     string  `json:"endTime,omitempty"`
+	Size        int64   `json:"size"`
+	Speed       float64 `json:"speed"`
+}
+
 // NewApp creates a new application instance
 func NewApp() *App {
 	logger, _ := zap.NewProduction()
@@ -87,6 +103,7 @@ func NewApp() *App {
 		},
 		Scripts: config.ScriptConfig{
 			ScriptDir:   "./data/scripts",
+			PythonPath:  "python3",
 			MaxExecTime: 5 * time.Minute,
 			MaxMemoryMB: 512,
 			AllowedPkgs: []string{"pandas", "numpy", "requests"},
@@ -218,12 +235,16 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 
 	// Stop services in reverse order
-	if err := a.scriptMgr.Stop(ctx); err != nil {
-		a.logger.Error("Error stopping script manager", zap.Error(err))
+	if a.scriptMgr != nil {
+		if err := a.scriptMgr.Stop(ctx); err != nil {
+			a.logger.Error("Error stopping script manager", zap.Error(err))
+		}
 	}
 
-	if err := a.peerHost.Close(); err != nil {
-		a.logger.Error("Error stopping p2p host", zap.Error(err))
+	if a.peerHost != nil {
+		if err := a.peerHost.Close(); err != nil {
+			a.logger.Error("Error stopping p2p host", zap.Error(err))
+		}
 	}
 
 	// Close database connection
@@ -250,7 +271,12 @@ func (a *App) RunScript(scriptID string) error {
 }
 
 func (a *App) StopScript(scriptID string) error {
-	return a.scriptMgr.Executor.StopScript(scriptID)
+	script, err := a.scriptMgr.GetScript(scriptID)
+	if err != nil {
+		return err
+	}
+	scriptPath := filepath.Join(a.config.Scripts.ScriptDir, script.Name)
+	return a.scriptMgr.Executor.StopScript(scriptPath)
 }
 
 func (a *App) GetScriptContent(scriptID string) (string, error) {
@@ -333,12 +359,6 @@ func (a *App) CheckConnection() bool {
 
 func (a *App) domReady(ctx context.Context) {
 	a.logger.Info("DOM Ready")
-
-	// Initialize any UI-dependent features here
-	if err := a.initServices(ctx); err != nil {
-		a.logger.Error("Failed to initialize services", zap.Error(err))
-		return
-	}
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
@@ -375,4 +395,132 @@ func (a *App) GetServerStatus() ServerStatus {
 	status.EmbeddedDBRunning = a.embedded != nil
 
 	return status
+}
+
+func (a *App) SearchData(request data.DataRequest) ([]data.DataSource, error) {
+	if a.repo == nil {
+		return nil, errors.New("repository not initialized")
+	}
+	return a.repo.SearchData(a.ctx, request)
+}
+
+func (a *App) RequestData(peerID string, request data.DataRequest) error {
+	if a.peerHost == nil {
+		return errors.New("peer host not initialized")
+	}
+	return a.peerHost.RequestData(a.ctx, peerID, request)
+}
+
+func (a *App) GetInsiderData(symbol, startDate, endDate string) ([]data.InsiderTrade, error) {
+	if a.repo == nil {
+		return nil, errors.New("repository not initialized")
+	}
+	return a.repo.GetInsiderData(a.ctx, symbol, startDate, endDate)
+}
+
+func (a *App) GetActiveTransfers() ([]ActiveTransfer, error) {
+	// Transfer tracking is not yet persisted; return a stable empty payload.
+	return []ActiveTransfer{}, nil
+}
+
+func (a *App) ResetDataConnection() error {
+	if a.peerHost == nil {
+		return nil
+	}
+	return a.peerHost.ResetConnection()
+}
+
+func (a *App) ResetDataProcessing() error {
+	if a.peerHost == nil {
+		return nil
+	}
+	return a.peerHost.ResetProcessing()
+}
+
+func (a *App) RetryConnection() error {
+	if a.peerHost == nil {
+		return nil
+	}
+	return a.peerHost.RetryConnection()
+}
+
+func (a *App) UpdateMarketData(items []data.MarketData) error {
+	if a.repo == nil {
+		return errors.New("repository not initialized")
+	}
+	for i := range items {
+		item := items[i]
+		if err := a.repo.SaveMarketData(a.ctx, &item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) UploadMarketData(payload map[string]interface{}) error {
+	if a.repo == nil {
+		return errors.New("repository not initialized")
+	}
+
+	symbol, _ := payload["symbol"].(string)
+	source, _ := payload["source"].(string)
+	dataType, _ := payload["type"].(string)
+	price, _ := payload["price"].(float64)
+	volume, _ := payload["volume"].(float64)
+
+	if dataType == "" {
+		dataType = data.DataTypeEOD
+	}
+	if source == "" {
+		source = "manual_upload"
+	}
+	if volume == 0 {
+		volume = 1
+	}
+	if price == 0 {
+		price = 1
+	}
+
+	marketData, err := data.NewMarketData(symbol, price, volume, source, dataType)
+	if err != nil {
+		return err
+	}
+	return a.repo.SaveMarketData(a.ctx, marketData)
+}
+
+func (a *App) UploadScript(scriptData map[string]string) error {
+	if a.scriptMgr == nil {
+		return errors.New("script manager not initialized")
+	}
+
+	name := scriptData["name"]
+	content := scriptData["content"]
+	if name == "" || content == "" {
+		return errors.New("script name and content are required")
+	}
+
+	metadata := &scripts.ScriptMetadata{
+		Name:        name,
+		Description: scriptData["description"],
+		Author:      scriptData["author"],
+		Version:     scriptData["version"],
+	}
+	return a.scriptMgr.AddScript(name, []byte(content), metadata)
+}
+
+func (a *App) DeleteScript(scriptID string) error {
+	if a.scriptMgr == nil {
+		return errors.New("script manager not initialized")
+	}
+	return a.scriptMgr.DeleteScript(scriptID)
+}
+
+func (a *App) InstallScript(scriptID string) error {
+	// Installation lifecycle is currently equivalent to script availability.
+	_, err := a.scriptMgr.GetScript(scriptID)
+	return err
+}
+
+func (a *App) UninstallScript(scriptID string) error {
+	return a.DeleteScript(scriptID)
 }

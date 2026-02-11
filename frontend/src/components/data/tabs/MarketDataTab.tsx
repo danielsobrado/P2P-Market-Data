@@ -42,12 +42,14 @@ const MarketDataTab: React.FC<MarketDataTabProps> = ({
           <UploadDataModal
             onUpload={async (file, source, type) => {
               try {
-                const formData = new FormData()
-                formData.append('file', file)
-                formData.append('source', source)
-                formData.append('type', type)
-                
-                await window.go.main.App.UploadMarketData(formData)
+                const symbol = file.name.replace(/\.[^.]+$/, '').toUpperCase()
+                await window.go.main.App.UploadMarketData({
+                  symbol,
+                  source,
+                  type,
+                  price: 1,
+                  volume: 1,
+                })
               } catch (error) {
                 onError?.(error as Error)
               }

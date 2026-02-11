@@ -19,15 +19,15 @@ import (
 )
 
 var (
-	configFile = flag.String("config", "config.yaml", "Path to configuration file")
+	configFile = flag.String("config", "config/db_config.yaml", "Path to configuration file")
 	dataDir    = flag.String("data-dir", "./data", "Data directory path")
 	debug      = flag.Bool("debug", false, "Enable debug mode")
 )
 
 // App represents the CLI application
 type App struct {
-	db        *database.Service 
-	scriptMgr *scripts.ScriptManager 
+	db        *database.Service
+	scriptMgr *scripts.ScriptManager
 	logger    *zap.Logger
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -91,7 +91,7 @@ func initializeApp(ctx context.Context, cfg *config.Config, logger *zap.Logger) 
 		ScriptDir: filepath.Join(*dataDir, "scripts"),
 		// Add other required config fields
 	}
-	
+
 	scriptManager, err := scripts.NewScriptManager(scriptConfig, logger)
 	if err != nil {
 		logger.Fatal("Failed to initialize script manager", zap.Error(err))

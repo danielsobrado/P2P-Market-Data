@@ -1,3 +1,30 @@
+import type {
+  DataRequest,
+  DataSource,
+  DataTransfer,
+  DividendData,
+  EODData,
+  InsiderTrade,
+  BaseMarketData,
+} from "./marketData"
+
+export interface Peer {
+  id: string
+  address: string
+  reputation: number
+  isConnected: boolean
+  lastSeen: string
+  roles: string[]
+}
+
+export interface ScriptUploadData {
+  name: string
+  content: string
+  description?: string
+  author?: string
+  version?: string
+}
+
 export {}
 
 declare global {
@@ -6,8 +33,8 @@ declare global {
       main: {
         App: {
           // Data management
-          UploadMarketData: (formData: FormData) => Promise<void>;
-          UpdateMarketData: (data: MarketDataBase[]) => Promise<void>;
+          UploadMarketData: (payload: Record<string, unknown>) => Promise<void>;
+          UpdateMarketData: (data: BaseMarketData[]) => Promise<void>;
           GetActiveTransfers: () => Promise<DataTransfer[]>;
           GetDataSources: () => Promise<DataSource[]>;
           SearchData: (request: DataRequest) => Promise<DataSource[]>;
