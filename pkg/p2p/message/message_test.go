@@ -3,9 +3,11 @@ package message
 import (
 	"bytes"
 	"encoding/json"
+	"math/rand"
 	"testing"
 	"time"
 
+	libp2pCrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -146,4 +148,73 @@ func TestMarshalUnmarshal_RoundTrip(t *testing.T) {
 	assert.Equal(t, msg.Version, parsed["version"])
 	assert.Equal(t, msg.ID, parsed["id"])
 	assert.NotNil(t, parsed["data"])
+}
+
+// TestSignVerify_RoundTrip is an end-to-end signing/verification test that
+// uses real libp2p Ed25519 crypto primitives.  It verifies that the bytes
+// produced by MarshalWithoutSignature can be signed and that the resulting
+// signature verifies against the same payload.
+func TestSignVerify_RoundTrip(t *testing.T) {
+	privKey, pubKey, err := libp2pCrypto.GenerateEd25519Key(rand.New(rand.NewSource(42)))
+	require.NoError(t, err)
+
+	msg := makeTestMessage()
+	payload, err := msg.MarshalWithoutSignature()
+	require.NoError(t, err)
+
+	sig, err := privKey.Sign(payload)
+	require.NoError(t, err)
+	msg.Signature = sig
+
+	// Re-derive the payload from the now-signed message; the signature field
+	// must not be included so the payload bytes are identical to what was signed.
+	payload2, err := msg.MarshalWithoutSignature()
+	require.NoError(t, err)
+
+	ok, err := pubKey.Verify(payload2, msg.Signature)
+	require.NoError(t, err)
+	assert.True(t, ok, "signature must verify successfully for an unmodified message")
+}
+
+// TestSignVerify_TamperedMessage verifies that modifying any data field after
+// signing causes signature verification to fail.
+func TestSignVerify_TamperedMessage(t *testing.T) {
+	privKey, pubKey, err := libp2pCrypto.GenerateEd25519Key(rand.New(rand.NewSource(99)))
+	require.NoError(t, err)
+
+	msg := makeTestMessage()
+	payload, err := msg.MarshalWithoutSignature()
+	require.NoError(t, err)
+
+	sig, err := privKey.Sign(payload)
+	require.NoError(t, err)
+	msg.Signature = sig
+
+	// Tamper with the data field after signing.
+	msg.Data = map[string]interface{}{"symbol": "EVIL", "price": 999999.0}
+
+	tamperedPayload, err := msg.MarshalWithoutSignature()
+	require.NoError(t, err)
+
+	ok, _ := pubKey.Verify(tamperedPayload, msg.Signature)
+	assert.False(t, ok, "signature must not verify after the message data has been tampered with")
+}
+
+// TestSignVerify_WrongKey verifies that a signature produced with one key
+// does not verify against a different public key.
+func TestSignVerify_WrongKey(t *testing.T) {
+	privKey, _, err := libp2pCrypto.GenerateEd25519Key(rand.New(rand.NewSource(1)))
+	require.NoError(t, err)
+	_, otherPubKey, err := libp2pCrypto.GenerateEd25519Key(rand.New(rand.NewSource(2)))
+	require.NoError(t, err)
+
+	msg := makeTestMessage()
+	payload, err := msg.MarshalWithoutSignature()
+	require.NoError(t, err)
+
+	sig, err := privKey.Sign(payload)
+	require.NoError(t, err)
+
+	ok, _ := otherPubKey.Verify(payload, sig)
+	assert.False(t, ok, "signature must not verify against a different public key")
 }

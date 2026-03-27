@@ -10,6 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -167,4 +168,43 @@ func TestConnectionAccounting_GetConnectedPeers(t *testing.T) {
 	got = cm.GetConnectedPeers()
 	assert.Len(t, got, 1)
 	assert.Equal(t, peerB, got[0])
+}
+
+// TestDisconnectPeer_UnknownPeer verifies that calling DisconnectPeer for a
+// peer that has never connected returns an error without touching the host
+// network.  This exercises the guard in DisconnectPeer without requiring a
+// real libp2p host.
+func TestDisconnectPeer_UnknownPeer(t *testing.T) {
+	cm := newTestConnectionManager(t)
+	unknown := peer.ID("never-seen-peer")
+
+	err := cm.DisconnectPeer(unknown)
+	require.Error(t, err, "disconnecting an untracked peer must return an error")
+	assert.Contains(t, err.Error(), "not connected",
+		"error message should indicate the peer is not connected")
+
+	// State must remain clean.
+	assert.Equal(t, 0, cm.ConnectionCount())
+	assert.False(t, cm.IsConnected(unknown))
+}
+
+// TestDisconnectPeer_AfterHandlerDisconnect verifies that once the network
+// notifier has already fired handleDisconnected, calling DisconnectPeer for
+// the same peer also returns an error (the peer is no longer in activeConns).
+func TestDisconnectPeer_AfterHandlerDisconnect(t *testing.T) {
+	cm := newTestConnectionManager(t)
+	peerA := peer.ID("peerA")
+	conn := &stubConn{remote: peerA}
+
+	cm.handleConnected(nil, conn)
+	assert.Equal(t, 1, cm.ConnectionCount())
+
+	// Simulate the network notifier firing (e.g. remote end closed).
+	cm.handleDisconnected(nil, conn)
+	assert.Equal(t, 0, cm.ConnectionCount())
+
+	// DisconnectPeer should now report the peer as not connected.
+	err := cm.DisconnectPeer(peerA)
+	require.Error(t, err, "DisconnectPeer must return an error for a peer that already disconnected")
+	assert.Contains(t, err.Error(), "not connected")
 }
