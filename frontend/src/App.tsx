@@ -18,13 +18,13 @@ function App() {
   const [isConnected, setIsConnected] = useState(false)
   const [activeView, setActiveView] = useState('data')
 
-  // Check connection status
+  // Check connection status using ServerStatus so the indicator reflects actual backend state
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        if (window?.go?.main?.App?.CheckConnection) {
-          const connected = await window.go.main.App.CheckConnection()
-          setIsConnected(Boolean(connected))
+        if (window?.go?.main?.App?.GetServerStatus) {
+          const status = await window.go.main.App.GetServerStatus()
+          setIsConnected(Boolean(status?.running && status?.databaseConnected))
           return
         }
         setIsConnected(false)
