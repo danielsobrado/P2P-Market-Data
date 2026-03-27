@@ -2,64 +2,76 @@
 package data
 
 import (
-    "context"
-    "fmt"
-    "os"
-    "path/filepath"
-    "sort"
-    "strings"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
-    "github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 type SchemaManager struct {
-    conn *pgx.Conn
+	conn *pgx.Conn
 }
 
 func NewSchemaManager(conn *pgx.Conn) *SchemaManager {
-    return &SchemaManager{
-        conn: conn,
-    }
+	return &SchemaManager{
+		conn: conn,
+	}
 }
 
 func (sm *SchemaManager) InitializeSchema(ctx context.Context) error {
-    schemaDir := "./sql/schema"
-    files, err := os.ReadDir(schemaDir)
-    if err != nil {
-        return fmt.Errorf("reading schema directory: %w", err)
-    }
+	statements, err := loadSchemaStatements("./sql/schema")
+	if err != nil {
+		return err
+	}
 
-    // Sort files to ensure correct order
-    fileNames := make([]string, 0, len(files))
-    for _, f := range files {
-        if strings.HasSuffix(f.Name(), ".sql") {
-            fileNames = append(fileNames, f.Name())
-        }
-    }
-    sort.Strings(fileNames)
+	tx, err := sm.conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
 
-    // Execute each schema file in transaction
-    tx, err := sm.conn.Begin(ctx)
-    if err != nil {
-        return fmt.Errorf("beginning transaction: %w", err)
-    }
-    defer tx.Rollback(ctx)
+	for _, statement := range statements {
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			return fmt.Errorf("executing schema statement: %w", err)
+		}
+	}
 
-    for _, fileName := range fileNames {
-        sqlFile := filepath.Join(schemaDir, fileName)
-        content, err := os.ReadFile(sqlFile)
-        if err != nil {
-            return fmt.Errorf("reading schema file %s: %w", fileName, err)
-        }
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing schema transaction: %w", err)
+	}
 
-        if _, err := tx.Exec(ctx, string(content)); err != nil {
-            return fmt.Errorf("executing schema file %s: %w", fileName, err)
-        }
-    }
+	return nil
+}
 
-    if err := tx.Commit(ctx); err != nil {
-        return fmt.Errorf("committing schema transaction: %w", err)
-    }
+func loadSchemaStatements(schemaDir string) ([]string, error) {
+	files, err := os.ReadDir(schemaDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading schema directory: %w", err)
+	}
 
-    return nil
+	fileNames := make([]string, 0, len(files))
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".sql") {
+			fileNames = append(fileNames, f.Name())
+		}
+	}
+	sort.Strings(fileNames)
+
+	statements := make([]string, 0, len(fileNames)+1)
+	statements = append(statements, `CREATE EXTENSION IF NOT EXISTS pgcrypto`)
+
+	for _, fileName := range fileNames {
+		sqlFile := filepath.Join(schemaDir, fileName)
+		content, err := os.ReadFile(sqlFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading schema file %s: %w", fileName, err)
+		}
+		statements = append(statements, string(content))
+	}
+
+	return statements, nil
 }
