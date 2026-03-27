@@ -152,6 +152,7 @@ func setDefaults(v *viper.Viper) {
 	// Database defaults
 	v.SetDefault("database.type", "postgres")
 	v.SetDefault("database.url", "postgres://postgres:postgres@localhost:5433/market_data?sslmode=disable")
+	v.SetDefault("database.port", 5433)
 	v.SetDefault("database.max_conns", 10)
 	v.SetDefault("database.min_conns", 2)
 	v.SetDefault("database.timeout", "30s")
@@ -277,6 +278,26 @@ func (c *Config) validateSecurity() error {
 	}
 
 	return nil
+}
+
+// LoadDefaults returns a Config populated from defaults and environment variables
+// only, without reading any config file. Useful as a fallback when no config
+// file is available.
+func LoadDefaults() (*Config, error) {
+	v := viper.New()
+	setDefaults(v)
+	v.SetEnvPrefix("P2P")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	cfg := &Config{}
+	if err := v.Unmarshal(cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse default config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid default configuration: %w", err)
+	}
+	return cfg, nil
 }
 
 // GetLogLevel returns a zap log level based on the configured string

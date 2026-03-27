@@ -421,3 +421,67 @@ func TestValidationEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadDefaults(t *testing.T) {
+t.Run("ReturnsValidConfig", func(t *testing.T) {
+cfg, err := LoadDefaults()
+require.NoError(t, err)
+require.NotNil(t, cfg)
+
+// Verify critical defaults used by the embedded Postgres path.
+assert.Equal(t, "postgres", cfg.Database.Type)
+assert.NotEmpty(t, cfg.Database.URL)
+assert.Equal(t, 5433, cfg.Database.Port)
+assert.Equal(t, 10, cfg.Database.MaxConnections)
+
+// Verify P2P defaults.
+assert.Equal(t, 9000, cfg.P2P.Port)
+assert.Equal(t, 50, cfg.P2P.MaxPeers)
+
+// Verify general defaults.
+assert.Equal(t, "development", cfg.Environment)
+assert.Equal(t, "info", cfg.LogLevel)
+})
+
+t.Run("EnvVarOverride", func(t *testing.T) {
+t.Setenv("P2P_LOG_LEVEL", "debug")
+t.Setenv("P2P_P2P_PORT", "8080")
+
+cfg, err := LoadDefaults()
+require.NoError(t, err)
+assert.Equal(t, "debug", cfg.LogLevel)
+assert.Equal(t, 8080, cfg.P2P.Port)
+})
+
+t.Run("SchedulerDefaultsValid", func(t *testing.T) {
+cfg, err := LoadDefaults()
+require.NoError(t, err)
+assert.Greater(t, cfg.Scheduler.MaxConcurrent, 0)
+assert.GreaterOrEqual(t, cfg.Scheduler.RetryAttempts, 0)
+})
+
+t.Run("DatabasePortDefaultIs5433", func(t *testing.T) {
+// Ensures the embedded-Postgres canonical port is always the default.
+cfg, err := LoadDefaults()
+require.NoError(t, err)
+assert.Equal(t, 5433, cfg.Database.Port)
+})
+}
+
+func TestGetLogLevelDefault(t *testing.T) {
+// Validate that an unrecognized level safely falls back to info.
+cfg := &Config{LogLevel: ""}
+level := cfg.GetLogLevel()
+assert.Equal(t, "info", level.String())
+
+cfg2 := &Config{LogLevel: "unknown"}
+level2 := cfg2.GetLogLevel()
+assert.Equal(t, "info", level2.String())
+}
+
+func TestLoadTimeout(t *testing.T) {
+// Ensure database timeout default is positive (required by validation).
+cfg, err := LoadDefaults()
+require.NoError(t, err)
+assert.Greater(t, cfg.Database.Timeout, time.Duration(0))
+}
