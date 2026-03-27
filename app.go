@@ -145,7 +145,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	// Initialize database schema for a fresh embedded database instance
-	if err := a.initSchema(ctx); err != nil {
+	if err := data.NewSchemaManager(a.conn).InitializeSchema(ctx); err != nil {
 		a.logger.Fatal("Failed to initialize database schema", zap.Error(err))
 		return
 	}
@@ -193,15 +193,6 @@ func (a *App) initDatabase(ctx context.Context) error {
 
 	return nil
 }
-
-func (a *App) initSchema(ctx context.Context) error {
-	if err := data.NewSchemaManager(a.conn).InitializeSchema(ctx); err != nil {
-		return fmt.Errorf("initializing schema: %w", err)
-	}
-
-	return nil
-}
-
 func (a *App) initServices(ctx context.Context) error {
 	var err error
 
