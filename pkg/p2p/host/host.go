@@ -38,6 +38,15 @@ const (
 	validationTimeout = 20 * time.Second
 )
 
+// hostState represents the lifecycle state of the Host.
+type hostState int
+
+const (
+	hostStopped  hostState = iota // initial state; never started or fully shut down
+	hostRunning                   // host is up and processing messages
+	hostStopping                  // Stop has been called; shutdown is in progress
+)
+
 // Host manages the P2P network functionality
 type Host struct {
 	cfg       *config.P2PConfig
@@ -48,7 +57,7 @@ type Host struct {
 	peerStore *PeerStore
 	validator *security.Validator
 	logger    *zap.Logger
-	running   bool
+	state     hostState
 
 	// Channels for coordination
 	shutdown   chan struct{}
@@ -164,10 +173,16 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 // Start begins P2P network operations
 func (h *Host) Start(ctx context.Context) error {
 	h.mu.Lock()
-	if h.running {
+	if h.state != hostStopped {
 		h.mu.Unlock()
-		return fmt.Errorf("host is already running")
+		if h.state == hostRunning {
+			return fmt.Errorf("host is already running")
+		}
+		return fmt.Errorf("host is shutting down, cannot start")
 	}
+	// Mark as running while the lock is still held so that concurrent Start
+	// calls are rejected before any startup work begins.
+	h.state = hostRunning
 	h.mu.Unlock()
 
 	h.logger.Info("Starting P2P host",
@@ -189,9 +204,6 @@ func (h *Host) Start(ctx context.Context) error {
 		h.logger.Warn("Failed to connect to some bootstrap peers", zap.Error(err))
 	}
 	h.status.UpdateStatus(true, false, nil)
-	h.mu.Lock()
-	h.running = true
-	h.mu.Unlock()
 
 	return nil
 }
@@ -199,11 +211,13 @@ func (h *Host) Start(ctx context.Context) error {
 // Stop gracefully shuts down the P2P host
 func (h *Host) Stop() error {
 	h.mu.Lock()
-	if !h.running {
+	if h.state != hostRunning {
 		h.mu.Unlock()
 		return nil
 	}
-	h.running = false
+	// Transition to stopping so that IsRunning() immediately reflects the
+	// in-progress shutdown while work below is still executing.
+	h.state = hostStopping
 	h.mu.Unlock()
 
 	h.logger.Info("Stopping P2P host")
@@ -230,8 +244,16 @@ func (h *Host) Stop() error {
 		}
 	}
 	if err := h.host.Close(); err != nil {
+		// Even on error, record that the host is no longer running.
+		h.mu.Lock()
+		h.state = hostStopped
+		h.mu.Unlock()
 		return fmt.Errorf("failed to close libp2p host: %w", err)
 	}
+
+	h.mu.Lock()
+	h.state = hostStopped
+	h.mu.Unlock()
 
 	h.logger.Info("P2P host stopped")
 	return nil
@@ -599,11 +621,13 @@ func (h *Host) StringToPeerID(peerIDStr string) (libp2pPeer.ID, error) {
 	return libp2pPeer.Decode(peerIDStr)
 }
 
-// IsRunning returns the current running state of the host
+// IsRunning returns true only when the host is fully started and not yet
+// stopping. It returns false both before Start is called and once Stop has
+// been called (even while shutdown is still in progress).
 func (h *Host) IsRunning() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.running
+	return h.state == hostRunning
 }
 
 func (h *Host) RequestData(ctx context.Context, peerID string, request data.DataRequest) error {
