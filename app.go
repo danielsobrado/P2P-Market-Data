@@ -144,6 +144,12 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 
+	// Initialize database schema for a fresh embedded database instance
+	if err := data.NewSchemaManager(a.conn).InitializeSchema(ctx); err != nil {
+		a.logger.Fatal("Failed to initialize database schema", zap.Error(err))
+		return
+	}
+
 	// Initialize repository
 	a.repo, err = data.NewPostgresRepository(ctx, a.conn, a.logger)
 	if err != nil {
@@ -187,7 +193,6 @@ func (a *App) initDatabase(ctx context.Context) error {
 
 	return nil
 }
-
 func (a *App) initServices(ctx context.Context) error {
 	var err error
 

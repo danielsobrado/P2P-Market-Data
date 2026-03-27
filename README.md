@@ -42,7 +42,7 @@ cd frontend && npm install
 # Build frontend assets (required by Go embed)
 cd frontend && npm install && npm run build && cd ..
 
-# Setup database schema (if using external Postgres)
+# Setup database schema (only needed if you are managing Postgres outside the app)
 for f in sql/schema/*.sql; do psql -U postgres -d market_data -f "$f"; done
 ```
 
@@ -55,6 +55,8 @@ wails dev
 # Build
 wails build
 ```
+
+When the Wails app starts its embedded PostgreSQL instance, it now initializes the required schema automatically.
 
 ## Directory Structure
 
