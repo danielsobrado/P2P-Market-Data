@@ -329,7 +329,10 @@ class SchemaManager:
             """
         ]
 
-        # Add foreign key constraints
+        # Add foreign key constraints.
+        # Note: PostgreSQL does not support ADD CONSTRAINT IF NOT EXISTS, so these
+        # statements will fail on re-runs if the constraint already exists.  The
+        # migration should be wrapped in idempotent logic by the caller when needed.
         for fk in table.foreign_keys:
             statements.append(
                 f"ALTER TABLE {self._quote(table.name)} ADD CONSTRAINT fk_{table.name} {fk};"

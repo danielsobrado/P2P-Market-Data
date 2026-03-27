@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -279,6 +280,12 @@ type ExecutorStats struct {
 func validateConfig(config *config.ScriptConfig) error {
 	if config.PythonPath == "" {
 		return fmt.Errorf("python path not set")
+	}
+	// Verify the interpreter exists and is named like a Python binary.
+	// PythonPath comes from operator-controlled configuration, not end-user input.
+	base := filepath.Base(config.PythonPath)
+	if !strings.HasPrefix(base, "python") {
+		return fmt.Errorf("python interpreter path %q does not look like a Python binary", config.PythonPath)
 	}
 	if _, err := exec.LookPath(config.PythonPath); err != nil {
 		return fmt.Errorf("python interpreter %q not found: %w", config.PythonPath, err)

@@ -547,7 +547,7 @@ func TestMissingPythonFails(t *testing.T) {
 logger := zaptest.NewLogger(t)
 cfg := &config.ScriptConfig{
 ScriptDir:   t.TempDir(),
-PythonPath:  "/nonexistent/python_interpreter_xyz",
+PythonPath:  "/nonexistent/python99_does_not_exist",
 MaxExecTime: time.Minute,
 MaxMemoryMB: 512,
 AllowedPkgs: []string{},
