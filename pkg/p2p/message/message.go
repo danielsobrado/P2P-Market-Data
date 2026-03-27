@@ -46,12 +46,24 @@ func (m *Message) Marshal() ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// MarshalWithoutSignature serializes the message without the signature field
+// MarshalWithoutSignature serializes the message without the signature field.
+// All integrity-sensitive fields are included so that the signed bytes cover
+// the full message content.
 func (m *Message) MarshalWithoutSignature() ([]byte, error) {
-	temp := &Message{
-		Type:     m.Type,
-		Data:     m.Data,
-		SenderID: m.SenderID,
+	temp := struct {
+		Type      MessageType `json:"type"`
+		Version   string      `json:"version"`
+		ID        string      `json:"id"`
+		Timestamp time.Time   `json:"timestamp"`
+		SenderID  peer.ID     `json:"sender_id"`
+		Data      interface{} `json:"data"`
+	}{
+		Type:      m.Type,
+		Version:   m.Version,
+		ID:        m.ID,
+		Timestamp: m.Timestamp,
+		SenderID:  m.SenderID,
+		Data:      m.Data,
 	}
 	return json.Marshal(temp)
 }

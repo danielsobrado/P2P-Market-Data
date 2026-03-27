@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -472,4 +473,147 @@ import non_existent_package
 		assert.NotEqual(t, 0, result.ExitCode)
 		assert.Contains(t, result.Error, "ImportError")
 	})
+}
+
+
+// TestStopScript verifies that StopScript terminates a long-running script
+// promptly and that the graceful->force-kill lifecycle does not hang.
+func TestStopScript(t *testing.T) {
+logger := zaptest.NewLogger(t)
+tmpDir := t.TempDir()
+cfg := &config.ScriptConfig{
+ScriptDir:   tmpDir,
+PythonPath:  "python3",
+MaxExecTime: time.Minute,
+MaxMemoryMB: 512,
+AllowedPkgs: []string{"time", "signal", "sys"},
+}
+manager, err := NewScriptManager(cfg, logger)
+require.NoError(t, err)
+
+script := []byte(`
+import time, signal, sys
+
+def handler(sig, frame):
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, handler)
+
+while True:
+    time.sleep(0.05)
+`)
+metadata := &ScriptMetadata{
+Name: "stop_test.py",
+}
+require.NoError(t, manager.AddScript(metadata.Name, script, metadata))
+
+scriptPath := filepath.Join(manager.Config.ScriptDir, metadata.Name)
+
+// Start the script asynchronously.
+done := make(chan error, 1)
+go func() {
+_, runErr := manager.Executor.ExecuteScript(context.Background(), scriptPath, nil)
+done <- runErr
+}()
+
+// Give the script a moment to start.
+time.Sleep(200 * time.Millisecond)
+
+// Stop should complete without hanging.
+stopDone := make(chan error, 1)
+go func() {
+stopDone <- manager.Executor.StopScript(scriptPath)
+}()
+
+select {
+case stopErr := <-stopDone:
+// StopScript may return an error if the script exited non-zero, which is fine.
+_ = stopErr
+case <-time.After(10 * time.Second):
+t.Fatal("StopScript did not return within 10 seconds")
+}
+
+// Wait for the executor goroutine to finish too.
+select {
+case <-done:
+case <-time.After(5 * time.Second):
+t.Fatal("ExecuteScript goroutine did not finish after stop")
+}
+}
+
+// TestMissingPythonFails verifies that NewScriptExecutor returns an error
+// when the configured Python interpreter does not exist.
+func TestMissingPythonFails(t *testing.T) {
+logger := zaptest.NewLogger(t)
+cfg := &config.ScriptConfig{
+ScriptDir:   t.TempDir(),
+PythonPath:  "/nonexistent/python_interpreter_xyz",
+MaxExecTime: time.Minute,
+MaxMemoryMB: 512,
+AllowedPkgs: []string{},
+}
+
+_, err := NewScriptExecutor(cfg, logger)
+require.Error(t, err, "should fail when python interpreter does not exist")
+assert.Contains(t, err.Error(), "python interpreter")
+}
+
+// TestValidateDependenciesTempDir verifies that ValidateDependencies does not
+// leave temporary files inside the script directory.
+func TestValidateDependenciesTempDir(t *testing.T) {
+logger := zaptest.NewLogger(t)
+tempDir := t.TempDir()
+cfg := &config.ScriptConfig{
+ScriptDir:   tempDir,
+PythonPath:  "python3",
+MaxExecTime: time.Minute,
+MaxMemoryMB: 512,
+// Include "json" so the test import script passes the allowed-import check.
+AllowedPkgs: []string{"json"},
+}
+manager, newErr := NewScriptManager(cfg, logger)
+require.NoError(t, newErr)
+
+script := []byte(`
+import json
+print("ok")
+`)
+metadata := &ScriptMetadata{
+Name:         "dep_test.py",
+Dependencies: []string{"json"},
+}
+require.NoError(t, manager.AddScript(metadata.Name, script, metadata))
+
+// ValidateDependencies may succeed or fail; what matters is that it does not
+// leave temp files in the script directory.
+_ = manager.ValidateDependencies(metadata.ID)
+
+// Confirm no stray temp files were created inside the script directory.
+entries, readErr := os.ReadDir(tempDir)
+require.NoError(t, readErr)
+for _, e := range entries {
+assert.False(t,
+strings.HasPrefix(e.Name(), "_test_import"),
+"found unexpected temp file %q in script dir", e.Name(),
+)
+}
+}
+
+// TestExecuteScriptResultOnError ensures that ExecuteScript always returns a
+// non-nil ExecutionResult even when the script fails (no nil-pointer panic).
+func TestExecuteScriptResultOnError(t *testing.T) {
+manager, _ := setupTestEnvironment(t)
+
+script := []byte(`
+raise RuntimeError("deliberate failure")
+`)
+metadata := &ScriptMetadata{
+Name: "fail_test.py",
+}
+require.NoError(t, manager.AddScript(metadata.Name, script, metadata))
+
+result, err := manager.ExecuteScript(context.Background(), metadata.ID, nil)
+assert.Error(t, err, "expected error from failing script")
+require.NotNil(t, result, "result must not be nil even when script fails")
+assert.NotEqual(t, 0, result.ExitCode)
 }

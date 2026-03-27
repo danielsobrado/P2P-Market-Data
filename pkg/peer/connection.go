@@ -114,19 +114,19 @@ func (cm *ConnectionManager) ConnectToPeer(p peer.AddrInfo) error {
 
 // DisconnectPeer disconnects from a peer
 func (cm *ConnectionManager) DisconnectPeer(id peer.ID) error {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.mu.RLock()
+	_, exists := cm.activeConns[id]
+	cm.mu.RUnlock()
 
-	if _, exists := cm.activeConns[id]; !exists {
+	if !exists {
 		return fmt.Errorf("peer not connected: %s", id)
 	}
 
+	// Close the connection; handleDisconnected will update activeConns/connCount
+	// via the network notification callback.
 	if err := cm.host.Network().ClosePeer(id); err != nil {
 		return fmt.Errorf("closing connection to peer %s: %w", id, err)
 	}
-
-	delete(cm.activeConns, id)
-	cm.connCount--
 
 	return nil
 }
@@ -138,8 +138,11 @@ func (cm *ConnectionManager) handleConnected(_ network.Network, conn network.Con
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	cm.activeConns[peerID] = time.Now()
-	cm.connCount++
+	// Only increment if this peer is not already tracked to prevent count drift.
+	if _, exists := cm.activeConns[peerID]; !exists {
+		cm.activeConns[peerID] = time.Now()
+		cm.connCount++
+	}
 
 	cm.logger.Debug("Peer connected",
 		zap.String("peer", peerID.String()),
@@ -155,8 +158,11 @@ func (cm *ConnectionManager) handleDisconnected(_ network.Network, conn network.
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	delete(cm.activeConns, peerID)
-	cm.connCount--
+	// Only decrement if the peer was tracked, preventing negative counts.
+	if _, exists := cm.activeConns[peerID]; exists {
+		delete(cm.activeConns, peerID)
+		cm.connCount--
+	}
 
 	cm.logger.Debug("Peer disconnected",
 		zap.String("peer", peerID.String()),
