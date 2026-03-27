@@ -319,20 +319,30 @@ func (m *ScriptManager) ValidateDependencies(scriptID string) error {
 	}
 
 	for _, dep := range script.Dependencies {
-		// Create temporary script to test import
-		testScript := fmt.Sprintf("import %s", dep)
-		tmpFile := filepath.Join(m.Config.ScriptDir, "_test_import.py")
+		testScript := fmt.Sprintf("import %s\n", dep)
 
-		if err := os.WriteFile(tmpFile, []byte(testScript), 0644); err != nil {
+		// Write the test import to a temp file outside the script directory so
+		// it does not pollute the live script directory.
+		tmpFile, err := os.CreateTemp("", "p2p_dep_*.py")
+		if err != nil {
 			return fmt.Errorf("creating test script: %w", err)
 		}
-		defer os.Remove(tmpFile)
+		tmpName := tmpFile.Name()
 
-		// Try to execute the test import
+		_, writeErr := tmpFile.WriteString(testScript)
+		tmpFile.Close()
+
+		if writeErr != nil {
+			os.Remove(tmpName)
+			return fmt.Errorf("writing test script: %w", writeErr)
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		_, execErr := m.Executor.ExecuteScript(ctx, tmpName, nil)
+		cancel()
+		os.Remove(tmpName)
 
-		if _, err := m.Executor.ExecuteScript(ctx, tmpFile, nil); err != nil {
+		if execErr != nil {
 			return fmt.Errorf("dependency not available: %s", dep)
 		}
 	}

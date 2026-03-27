@@ -75,10 +75,15 @@ function App() {
                 </NavigationMenuList>
               </NavigationMenu>
               <ModeToggle />
-              <div className={cn(
-                "h-2 w-2 rounded-full",
-                isConnected ? "bg-green-500" : "bg-red-500"
-              )} />
+              <div className="flex items-center gap-1">
+                <div className={cn(
+                  "h-2 w-2 rounded-full",
+                  isConnected ? "bg-green-500" : "bg-red-500"
+                )} />
+                <span className="text-xs text-muted-foreground">
+                  {isConnected ? "Connected" : "Disconnected"}
+                </span>
+              </div>
             </div>
           </div>
         </header>

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -18,6 +19,14 @@ import (
 
 	"p2p_market_data/pkg/config"
 )
+
+// scriptRun holds per-execution state so StopScript can signal the process
+// and wait for the background goroutine's cmd.Wait() to finish without
+// calling Wait() a second time.
+type scriptRun struct {
+	cmd  *exec.Cmd
+	done chan struct{} // closed when the background cmd.Wait() returns
+}
 
 // ExecutionResult represents the result of a script execution
 type ExecutionResult struct {
@@ -36,8 +45,7 @@ type ScriptExecutor struct {
 	config         *config.ScriptConfig
 	logger         *zap.Logger
 	metrics        *ExecutorMetrics
-	processMap     sync.Map // maps script IDs to running processes
-	runningScripts sync.Map // tracks running scripts by ID
+	runningScripts sync.Map // maps script path/ID to *scriptRun
 }
 
 // ExecutorMetrics tracks script execution metrics
@@ -76,27 +84,27 @@ func (e *ScriptExecutor) ExecuteScript(ctx context.Context, scriptPath string, a
 		return nil, fmt.Errorf("preparing environment: %w", err)
 	}
 
-	// Create result channels
-	resultChan := make(chan *ExecutionResult, 1)
-	errChan := make(chan error, 1)
+	// Create result channels — carry both result and error so the caller always
+	// receives the ExecutionResult even when the script exits non-zero.
+	type outcome struct {
+		result *ExecutionResult
+		err    error
+	}
+	outChan := make(chan outcome, 1)
 
 	// Start execution
 	go func() {
 		result, err := e.runScript(ctx, scriptPath, args, env)
-		if err != nil {
-			errChan <- err
-			return
-		}
-		resultChan <- result
+		outChan <- outcome{result, err}
 	}()
 
-	// Wait for completion or timeout
+	// Wait for completion or context cancellation
 	select {
-	case result := <-resultChan:
-		e.updateMetrics(result)
-		return result, nil
-	case err := <-errChan:
-		return nil, err
+	case out := <-outChan:
+		if out.err == nil {
+			e.updateMetrics(out.result)
+		}
+		return out.result, out.err
 	case <-ctx.Done():
 		e.killScript(scriptPath)
 		return nil, ctx.Err()
@@ -119,16 +127,19 @@ func (e *ScriptExecutor) runScript(ctx context.Context, scriptPath string, args 
 	// Set resource limits
 	cmd.SysProcAttr = &syscall.SysProcAttr{}
 
-	e.runningScripts.Store(scriptPath, cmd)
-	defer e.runningScripts.Delete(scriptPath)
+	// Register the run entry before Start so StopScript can find it.
+	run := &scriptRun{cmd: cmd, done: make(chan struct{})}
+	e.runningScripts.Store(scriptPath, run)
+	defer func() {
+		close(run.done)
+		e.runningScripts.Delete(scriptPath)
+	}()
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting script: %w", err)
 	}
-	e.processMap.Store(scriptPath, cmd.Process)
-	defer e.processMap.Delete(scriptPath)
 
-	// Run script
+	// Run script — this is the single authoritative Wait() call.
 	err := cmd.Wait()
 
 	// Prepare result
@@ -141,8 +152,7 @@ func (e *ScriptExecutor) runScript(ctx context.Context, scriptPath string, args 
 		Metrics:   make(map[string]interface{}),
 	}
 
-	// Get resource usage
-	result.MemoryUsage = 0 // Memory usage not available on this platform
+	result.MemoryUsage = 0
 	result.CPUTime = 0
 
 	if err != nil {
@@ -211,11 +221,11 @@ func (e *ScriptExecutor) prepareEnvironment() ([]string, error) {
 	return env, nil
 }
 
-// killScript terminates a running script
+// killScript terminates a running script (best-effort; used on context cancellation)
 func (e *ScriptExecutor) killScript(scriptPath string) {
-	if proc, ok := e.processMap.Load(scriptPath); ok {
-		if p, ok := proc.(*os.Process); ok {
-			p.Kill()
+	if val, ok := e.runningScripts.Load(scriptPath); ok {
+		if run, ok := val.(*scriptRun); ok && run.cmd != nil && run.cmd.Process != nil {
+			_ = run.cmd.Process.Kill()
 		}
 	}
 }
@@ -271,6 +281,15 @@ func validateConfig(config *config.ScriptConfig) error {
 	if config.PythonPath == "" {
 		return fmt.Errorf("python path not set")
 	}
+	// Verify the interpreter exists and is named like a Python binary.
+	// PythonPath comes from operator-controlled configuration, not end-user input.
+	base := filepath.Base(config.PythonPath)
+	if !strings.HasPrefix(base, "python") {
+		return fmt.Errorf("python interpreter path %q does not look like a Python binary", config.PythonPath)
+	}
+	if _, err := exec.LookPath(config.PythonPath); err != nil {
+		return fmt.Errorf("python interpreter %q not found: %w", config.PythonPath, err)
+	}
 	if config.MaxExecTime <= 0 {
 		return fmt.Errorf("invalid maximum execution time")
 	}
@@ -310,52 +329,63 @@ func (e *ScriptExecutor) ExecuteScriptWithInput(ctx context.Context, scriptPath 
 func (e *ScriptExecutor) ExecuteScriptWithOutputCapture(ctx context.Context, scriptPath string, outputType interface{}) (*ExecutionResult, error) {
 	result, err := e.ExecuteScript(ctx, scriptPath, []string{"--json-output"})
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 
-	// Parse JSON output
-	if err := json.Unmarshal([]byte(result.Output), outputType); err != nil {
-		return nil, fmt.Errorf("parsing script output: %w", err)
+	// Trim surrounding whitespace before parsing to handle trailing newlines etc.
+	trimmed := strings.TrimSpace(result.Output)
+	if err := json.Unmarshal([]byte(trimmed), outputType); err != nil {
+		return result, fmt.Errorf("parsing script JSON output: %w (raw output: %q)", err, trimmed)
 	}
 
 	return result, nil
 }
 
-// StopScript stops a running script by ID
+// StopScript stops a running script by ID using graceful→timeout→force-kill.
+// It waits for the background cmd.Wait() goroutine to finish so there is no
+// double-Wait() race condition.
 func (e *ScriptExecutor) StopScript(scriptID string) error {
 	value, exists := e.runningScripts.Load(scriptID)
 	if !exists {
 		return fmt.Errorf("script %s is not running", scriptID)
 	}
 
-	cmd := value.(*exec.Cmd)
-	if cmd == nil || cmd.Process == nil {
-		e.runningScripts.Delete(scriptID)
+	run, ok := value.(*scriptRun)
+	if !ok || run.cmd == nil || run.cmd.Process == nil {
 		return nil
 	}
 
-	// Try graceful shutdown first
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+	// Try graceful shutdown first.
+	if err := run.cmd.Process.Signal(os.Interrupt); err != nil {
 		e.logger.Warn("Failed to send interrupt signal",
 			zap.String("scriptID", scriptID),
 			zap.Error(err))
+	}
 
-		// Force kill if graceful shutdown fails
-		if err := cmd.Process.Kill(); err != nil {
-			return fmt.Errorf("failed to kill script: %w", err)
+	// Wait up to 5 s for the process to exit cleanly.
+	select {
+	case <-run.done:
+		e.logger.Info("Script stopped gracefully", zap.String("scriptID", scriptID))
+		return nil
+	case <-time.After(5 * time.Second):
+		// Escalate to SIGKILL.
+		e.logger.Warn("Script did not stop gracefully; force killing",
+			zap.String("scriptID", scriptID))
+		if err := run.cmd.Process.Kill(); err != nil {
+			e.logger.Warn("Failed to kill script",
+				zap.String("scriptID", scriptID),
+				zap.Error(err))
 		}
 	}
 
-	// Wait for process to exit
-	if err := cmd.Wait(); err != nil {
-		if _, ok := err.(*exec.ExitError); !ok {
-			return fmt.Errorf("error waiting for script to stop: %w", err)
-		}
+	// Give the OS up to 2 s to reap the process after the kill.
+	select {
+	case <-run.done:
+		e.logger.Info("Script force-killed", zap.String("scriptID", scriptID))
+		return nil
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("script %s did not stop after force kill", scriptID)
 	}
-
-	e.runningScripts.Delete(scriptID)
-	e.logger.Info("Script stopped", zap.String("scriptID", scriptID))
-	return nil
 }
 
 // Stop stops all running scripts and cleans up resources

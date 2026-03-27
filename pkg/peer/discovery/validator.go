@@ -75,7 +75,7 @@ func (v *Validator) Select(key string, values [][]byte) (int, error) {
 		return 0, fmt.Errorf("no values to select from")
 	}
 
-	bestIndex := 0
+	bestIndex := -1
 	var bestTime time.Time
 	var bestVersion int
 
@@ -90,8 +90,7 @@ func (v *Validator) Select(key string, values [][]byte) (int, error) {
 			continue
 		}
 
-		// Prefer higher versions first
-		if record.Version > bestVersion {
+		if bestIndex == -1 || record.Version > bestVersion {
 			bestIndex = i
 			bestVersion = record.Version
 			bestTime = record.Timestamp
@@ -103,6 +102,10 @@ func (v *Validator) Select(key string, values [][]byte) (int, error) {
 			bestIndex = i
 			bestTime = record.Timestamp
 		}
+	}
+
+	if bestIndex == -1 {
+		return 0, fmt.Errorf("no valid records found")
 	}
 
 	return bestIndex, nil

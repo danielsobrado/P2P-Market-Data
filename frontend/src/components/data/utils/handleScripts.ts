@@ -11,6 +11,8 @@ interface ScriptUploadData {
 
 interface HandleScriptsProps {
   setScripts: React.Dispatch<React.SetStateAction<ScriptInfo[]>>
+  /** Called after any mutation so the scripts list is refreshed from the backend. */
+  refreshScripts: () => Promise<void>
   onError?: (error: Error) => void
 }
 
@@ -26,12 +28,11 @@ interface App {
   UninstallScript: (scriptId: string) => Promise<void>
 }
 
-export const handleScripts = ({ setScripts, onError }: HandleScriptsProps) => {
-  const handleViewCode = async (scriptId: string) => {
+export const handleScripts = ({ setScripts, refreshScripts, onError }: HandleScriptsProps) => {
+  /** Fetches and returns the source code of a script. */
+  const handleViewCode = async (scriptId: string): Promise<string | undefined> => {
     try {
-      const code = await window.go.main.App.GetScriptContent(scriptId)
-      // Handle the code as needed, e.g., set in state
-      // setSelectedScriptCode(code)
+      return await window.go.main.App.GetScriptContent(scriptId)
     } catch (error) {
       onError?.(error as Error)
     }
@@ -40,8 +41,7 @@ export const handleScripts = ({ setScripts, onError }: HandleScriptsProps) => {
   const handleUploadScript = async (scriptData: ScriptUploadData) => {
     try {
       await window.go.main.App.UploadScript(scriptData)
-      // Refresh scripts list
-      // setScripts(updatedScripts)
+      await refreshScripts()
     } catch (error) {
       onError?.(error as Error)
     }
@@ -50,7 +50,7 @@ export const handleScripts = ({ setScripts, onError }: HandleScriptsProps) => {
   const handleRunScript = async (scriptId: string) => {
     try {
       await window.go.main.App.RunScript(scriptId)
-      // Refresh scripts list
+      await refreshScripts()
     } catch (error) {
       onError?.(error as Error)
     }
@@ -59,7 +59,7 @@ export const handleScripts = ({ setScripts, onError }: HandleScriptsProps) => {
   const handleStopScript = async (scriptId: string) => {
     try {
       await window.go.main.App.StopScript(scriptId)
-      // Refresh scripts list
+      await refreshScripts()
     } catch (error) {
       onError?.(error as Error)
     }
@@ -69,7 +69,7 @@ export const handleScripts = ({ setScripts, onError }: HandleScriptsProps) => {
     if (confirm('Are you sure you want to delete this script?')) {
       try {
         await window.go.main.App.DeleteScript(scriptId)
-        // Refresh scripts list
+        await refreshScripts()
       } catch (error) {
         onError?.(error as Error)
       }
@@ -79,7 +79,7 @@ export const handleScripts = ({ setScripts, onError }: HandleScriptsProps) => {
   const handleInstallScript = async (scriptId: string) => {
     try {
       await window.go.main.App.InstallScript(scriptId)
-      // Refresh scripts list
+      await refreshScripts()
     } catch (error) {
       onError?.(error as Error)
     }
@@ -88,7 +88,7 @@ export const handleScripts = ({ setScripts, onError }: HandleScriptsProps) => {
   const handleUninstallScript = async (scriptId: string) => {
     try {
       await window.go.main.App.UninstallScript(scriptId)
-      // Refresh scripts list
+      await refreshScripts()
     } catch (error) {
       onError?.(error as Error)
     }

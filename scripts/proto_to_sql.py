@@ -172,6 +172,16 @@ class ProtobufToSQLConverter:
         'timestamp': 'TIMESTAMP',
     }
 
+    # Only allow simple alphanumeric/underscore identifiers to prevent SQL injection.
+    _SAFE_IDENTIFIER = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+    @classmethod
+    def _quote(cls, name: str) -> str:
+        """Return a safely double-quoted SQL identifier after validation."""
+        if not cls._SAFE_IDENTIFIER.match(name):
+            raise ValueError(f"Unsafe SQL identifier: {name!r}")
+        return f'"{name}"'
+
     def __init__(self, proto_path: str):
         self.proto_path = proto_path
         self.tables: Dict[str, Table] = {}
@@ -308,21 +318,24 @@ class SchemaManager:
             nullable = "NULL" if col.is_nullable else "NOT NULL"
             pk = "PRIMARY KEY" if col.is_primary_key else ""
             column_defs.append(
-                f"{col.name} {col.data_type} {nullable} {pk}".strip()
+                f"{self._quote(col.name)} {col.data_type} {nullable} {pk}".strip()
             )
 
         statements = [
             f"""
-            CREATE TABLE {table.name} (
+            CREATE TABLE IF NOT EXISTS {self._quote(table.name)} (
                 {','.join(column_defs)}
             );
             """
         ]
 
-        # Add foreign key constraints
+        # Add foreign key constraints.
+        # Note: PostgreSQL does not support ADD CONSTRAINT IF NOT EXISTS, so these
+        # statements will fail on re-runs if the constraint already exists.  The
+        # migration should be wrapped in idempotent logic by the caller when needed.
         for fk in table.foreign_keys:
             statements.append(
-                f"ALTER TABLE {table.name} ADD CONSTRAINT fk_{table.name} {fk};"
+                f"ALTER TABLE {self._quote(table.name)} ADD CONSTRAINT fk_{table.name} {fk};"
             )
 
         return statements
@@ -340,7 +353,7 @@ class SchemaManager:
             if col_name not in current_cols:
                 nullable = "NULL" if col.is_nullable else "NOT NULL"
                 statements.append(
-                    f"ALTER TABLE {current.name} ADD COLUMN {col_name} "
+                    f"ALTER TABLE {self._quote(current.name)} ADD COLUMN {self._quote(col_name)} "
                     f"{col.data_type} {nullable};"
                 )
         
@@ -352,9 +365,9 @@ class SchemaManager:
                     new_col.is_nullable != current_col.is_nullable):
                     nullable = "NULL" if new_col.is_nullable else "NOT NULL"
                     statements.append(
-                        f"ALTER TABLE {current.name} ALTER COLUMN {col_name} "
-                        f"TYPE {new_col.data_type} USING {col_name}::{new_col.data_type}, "
-                        f"ALTER COLUMN {col_name} SET {nullable};"
+                        f"ALTER TABLE {self._quote(current.name)} ALTER COLUMN {self._quote(col_name)} "
+                        f"TYPE {new_col.data_type} USING {self._quote(col_name)}::{new_col.data_type}, "
+                        f"ALTER COLUMN {self._quote(col_name)} SET {nullable};"
                     )
         
         # Add new foreign keys
@@ -362,7 +375,7 @@ class SchemaManager:
         new_fks = set(new.foreign_keys)
         for fk in new_fks - current_fks:
             statements.append(
-                f"ALTER TABLE {current.name} ADD CONSTRAINT fk_{current.name}_{len(statements)} {fk};"
+                f"ALTER TABLE {self._quote(current.name)} ADD CONSTRAINT fk_{current.name}_{len(statements)} {fk};"
             )
 
         return statements
@@ -410,6 +423,7 @@ def main():
     proto_dir = project_root / 'proto'
     sql_dir = project_root / 'sql'
 
+    schema_manager = None
     try:
         # Load database configuration
         db_params = ConfigManager.load_db_config()
@@ -443,7 +457,9 @@ def main():
         logger.error(f"Error during schema migration: {e}")
         raise
     finally:
-        schema_manager.conn.close()
+        # Only close the connection if schema_manager was successfully initialised.
+        if schema_manager is not None:
+            schema_manager.conn.close()
 
 if __name__ == "__main__":
     main()
