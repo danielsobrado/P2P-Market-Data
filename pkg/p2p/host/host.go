@@ -168,6 +168,9 @@ func (h *Host) Start(ctx context.Context) error {
 		h.mu.Unlock()
 		return fmt.Errorf("host is already running")
 	}
+	// Mark as running while still holding the lock so that concurrent
+	// callers cannot both observe running==false and proceed with startup.
+	h.running = true
 	h.mu.Unlock()
 
 	h.logger.Info("Starting P2P host",
@@ -189,9 +192,6 @@ func (h *Host) Start(ctx context.Context) error {
 		h.logger.Warn("Failed to connect to some bootstrap peers", zap.Error(err))
 	}
 	h.status.UpdateStatus(true, false, nil)
-	h.mu.Lock()
-	h.running = true
-	h.mu.Unlock()
 
 	return nil
 }
