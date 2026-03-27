@@ -62,6 +62,7 @@ func loadSchemaStatements(schemaDir string) ([]string, error) {
 	sort.Strings(fileNames)
 
 	statements := make([]string, 0, len(fileNames)+1)
+	// The schema uses gen_random_uuid() defaults, which are provided by pgcrypto.
 	statements = append(statements, `CREATE EXTENSION IF NOT EXISTS pgcrypto`)
 
 	for _, fileName := range fileNames {

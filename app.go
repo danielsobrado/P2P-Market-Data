@@ -195,8 +195,7 @@ func (a *App) initDatabase(ctx context.Context) error {
 }
 
 func (a *App) initSchema(ctx context.Context) error {
-	schemaManager := data.NewSchemaManager(a.conn)
-	if err := schemaManager.InitializeSchema(ctx); err != nil {
+	if err := data.NewSchemaManager(a.conn).InitializeSchema(ctx); err != nil {
 		return fmt.Errorf("initializing schema: %w", err)
 	}
 
