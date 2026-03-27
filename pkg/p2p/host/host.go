@@ -163,6 +163,13 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 
 // Start begins P2P network operations
 func (h *Host) Start(ctx context.Context) error {
+	h.mu.Lock()
+	if h.running {
+		h.mu.Unlock()
+		return fmt.Errorf("host is already running")
+	}
+	h.mu.Unlock()
+
 	h.logger.Info("Starting P2P host",
 		zap.String("peerID", h.host.ID().String()),
 		zap.Any("listenAddrs", h.host.Addrs()))
@@ -181,9 +188,8 @@ func (h *Host) Start(ctx context.Context) error {
 	if err := h.connectToBootstrapPeers(ctx); err != nil {
 		h.logger.Warn("Failed to connect to some bootstrap peers", zap.Error(err))
 	}
+	h.status.UpdateStatus(true, false, nil)
 	h.mu.Lock()
-	h.status.IsReady = true
-	h.status.UpdatedAt = time.Now()
 	h.running = true
 	h.mu.Unlock()
 
@@ -192,6 +198,14 @@ func (h *Host) Start(ctx context.Context) error {
 
 // Stop gracefully shuts down the P2P host
 func (h *Host) Stop() error {
+	h.mu.Lock()
+	if !h.running {
+		h.mu.Unlock()
+		return nil
+	}
+	h.running = false
+	h.mu.Unlock()
+
 	h.logger.Info("Stopping P2P host")
 
 	// Signal shutdown
@@ -218,10 +232,6 @@ func (h *Host) Stop() error {
 	if err := h.host.Close(); err != nil {
 		return fmt.Errorf("failed to close libp2p host: %w", err)
 	}
-
-	h.mu.Lock()
-	h.running = false
-	h.mu.Unlock()
 
 	h.logger.Info("P2P host stopped")
 	return nil
@@ -564,10 +574,9 @@ func validateP2PConfig(cfg *config.P2PConfig) error {
 	if cfg.Port == 0 {
 		return fmt.Errorf("P2P port must be specified")
 	}
-	// TODO: Fails here
-	// if cfg.Security.KeyFile == "" {
-	// 	return fmt.Errorf("security key file must be specified")
-	// }
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return fmt.Errorf("P2P port %d is out of valid range (1-65535)", cfg.Port)
+	}
 
 	return nil
 }
@@ -591,11 +600,10 @@ func (h *Host) StringToPeerID(peerIDStr string) (libp2pPeer.ID, error) {
 }
 
 // IsRunning returns the current running state of the host
-
 func (h *Host) IsRunning() bool {
-
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return h.running
-
 }
 
 func (h *Host) RequestData(ctx context.Context, peerID string, request data.DataRequest) error {

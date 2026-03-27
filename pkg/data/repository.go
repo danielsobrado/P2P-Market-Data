@@ -413,7 +413,7 @@ func (r *PostgresRepository) SaveMarketData(ctx context.Context, data *MarketDat
 		return fmt.Errorf("marshaling metadata: %w", err)
 	}
 
-	_, err := r.conn.Exec(ctx, query,
+	_, err = r.conn.Exec(ctx, query,
 		data.ID, data.Symbol, data.Price, data.Volume, data.Timestamp,
 		data.Source, data.DataType, signaturesJSON, metadataJSON,
 		data.ValidationScore, data.Hash, data.CreatedAt, data.UpdatedAt,
@@ -1061,55 +1061,6 @@ func (r *PostgresRepository) SaveDividendData(ctx context.Context, dividend *Div
 	return nil
 }
 
-// GetDataSources retrieves currently known data sources from peers.
-func (r *PostgresRepository) GetDataSources(ctx context.Context) ([]DataSource, error) {
-	query := `
-		SELECT id, reputation, roles, metadata, last_seen
-		FROM peers
-		ORDER BY reputation DESC, last_seen DESC
-	`
-
-	rows, err := r.conn.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("querying data sources: %w", err)
-	}
-	defer rows.Close()
-
-	sources := make([]DataSource, 0)
-	for rows.Next() {
-		var id string
-		var reputation float64
-		var roles []string
-		var metadataJSON []byte
-		var lastSeen time.Time
-		if err := rows.Scan(&id, &reputation, &roles, &metadataJSON, &lastSeen); err != nil {
-			return nil, fmt.Errorf("scanning data source: %w", err)
-		}
-
-		meta := map[string]interface{}{}
-		if len(metadataJSON) > 0 {
-			if err := json.Unmarshal(metadataJSON, &meta); err != nil {
-				return nil, fmt.Errorf("unmarshaling source metadata: %w", err)
-			}
-		}
-
-		source := DataSource{
-			ID:               id,
-			PeerID:           id,
-			Reputation:       reputation,
-			DataTypes:        roles,
-			AvailableSymbols: []string{},
-			LastUpdate:       lastSeen,
-			Reliability:      reputation,
-		}
-		sources = append(sources, source)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating data sources: %w", err)
-	}
-
-	return sources, nil
-}
 
 func parseFloat(value string) float64 {
 	if value == "" {
