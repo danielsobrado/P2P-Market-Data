@@ -64,62 +64,56 @@ type ActiveTransfer struct {
 	Speed       float64 `json:"speed"`
 }
 
-// NewApp creates a new application instance
-func NewApp() *App {
-	logger, _ := zap.NewProduction()
+// NewApp creates a new application instance using the provided configuration.
+// cfg must not be nil; callers should load it via config.Load or config.LoadDefaults.
+// Returns an error if logger creation or directory setup fails.
+func NewApp(cfg *config.Config) (*App, error) {
+	if cfg == nil {
+		return nil, errors.New("config must not be nil")
+	}
+
+	// Build logger from configuration.
+	var zapLogger *zap.Logger
+	var err error
+	if cfg.IsDevelopment() {
+		zapLogger, err = zap.NewDevelopment()
+	} else {
+		zapLogger, err = zap.NewProduction()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("creating logger: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create data directories
+	// Create data directories needed by the embedded Postgres runtime and scripts.
 	dirs := []string{
 		"./data",
 		"./data/postgres",
 		"./data/scripts",
 		"./data/keys",
 	}
-
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			logger.Fatal("Failed to create directory",
-				zap.String("dir", dir),
-				zap.Error(err))
+			cancel()
+			_ = zapLogger.Sync()
+			return nil, fmt.Errorf("creating directory %q: %w", dir, err)
 		}
 	}
 
-	// Create default configuration
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type:           "postgres",
-			Port:           5433,
-			MaxConnections: 10,
-			MinConnections: 2,
-			SSLMode:        "disable",
-		},
-		P2P: config.P2PConfig{
-			Port:           4001,
-			MaxPeers:       50,
-			MinPeers:       5,
-			PeerTimeout:    30 * time.Second,
-			BootstrapPeers: []string{},
-		},
-		Scripts: config.ScriptConfig{
-			ScriptDir:   "./data/scripts",
-			PythonPath:  "python3",
-			MaxExecTime: 5 * time.Minute,
-			MaxMemoryMB: 512,
-			AllowedPkgs: []string{"pandas", "numpy", "requests"},
-		},
-		Security: config.SecurityConfig{
-			KeyFile: "./data/keys/host.key",
-		},
+	// Ensure the script directory points at the embedded data layout when the
+	// config is still using the generic default value.
+	if cfg.Scripts.ScriptDir == "scripts" {
+		cfg.Scripts.ScriptDir = "./data/scripts"
 	}
 
 	return &App{
 		ctx:     ctx,
 		cancel:  cancel,
-		logger:  logger,
+		logger:  zapLogger,
 		config:  cfg,
 		cleanup: make([]func() error, 0),
-	}
+	}, nil
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -134,37 +128,60 @@ func (a *App) startup(ctx context.Context) {
 
 	// Initialize embedded database
 	if err := a.initEmbeddedDB(); err != nil {
-		a.logger.Fatal("Failed to initialize embedded database", zap.Error(err))
+		a.logger.Error("Failed to initialize embedded database", zap.Error(err))
 		return
 	}
 
 	// Initialize database connection
 	if err := a.initDatabase(ctx); err != nil {
-		a.logger.Fatal("Failed to initialize database", zap.Error(err))
+		a.logger.Error("Failed to initialize database", zap.Error(err))
+		a.cleanupEmbeddedDB()
 		return
 	}
 
 	// Initialize database schema for a fresh embedded database instance
 	if err := data.NewSchemaManager(a.conn).InitializeSchema(ctx); err != nil {
-		a.logger.Fatal("Failed to initialize database schema", zap.Error(err))
+		a.logger.Error("Failed to initialize database schema", zap.Error(err))
+		a.cleanupDBResources(ctx)
 		return
 	}
 
 	// Initialize repository
 	a.repo, err = data.NewPostgresRepository(ctx, a.conn, a.logger)
 	if err != nil {
-		a.logger.Fatal("Failed to create repository", zap.Error(err))
+		a.logger.Error("Failed to create repository", zap.Error(err))
+		a.cleanupDBResources(ctx)
 		return
 	}
 
 	// Initialize and start services
 	if err := a.initServices(ctx); err != nil {
-		a.logger.Fatal("Failed to initialize services", zap.Error(err))
+		a.logger.Error("Failed to initialize services", zap.Error(err))
+		a.cleanupDBResources(ctx)
 		return
 	}
 
 	a.running = true
 	a.logger.Info("Application started successfully")
+}
+
+// cleanupEmbeddedDB stops the embedded Postgres instance if it was started.
+func (a *App) cleanupEmbeddedDB() {
+	if a.embedded != nil {
+		if err := a.embedded.Stop(); err != nil {
+			a.logger.Error("Failed to stop embedded database during cleanup", zap.Error(err))
+		}
+	}
+}
+
+// cleanupDBResources closes the database connection and stops the embedded
+// Postgres instance. Called on partial startup failure.
+func (a *App) cleanupDBResources(ctx context.Context) {
+	if a.conn != nil {
+		a.conn.Close(ctx)
+		a.conn = nil
+	}
+	a.cleanupEmbeddedDB()
 }
 
 func (a *App) initEmbeddedDB() error {

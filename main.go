@@ -4,6 +4,8 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/logger"
@@ -11,6 +13,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+
+	"p2p_market_data/pkg/config"
 )
 
 //go:embed frontend/dist
@@ -20,14 +24,24 @@ var assets embed.FS
 var icon []byte
 
 func main() {
-	// Create configuration with defaults
-	// cfg := config.DefaultConfig()
+	// Load configuration; both Wails options and the App struct share this instance.
+	cfg, err := loadWailsConfig()
+	if err != nil {
+		log.Printf("Warning: could not load config (%v), falling back to defaults", err)
+		cfg, err = config.LoadDefaults()
+		if err != nil {
+			log.Fatalf("Failed to load default configuration: %v", err)
+		}
+	}
 
 	// Create an instance of the app structure
-	app := NewApp()
+	app, err := NewApp(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create application: %v", err)
+	}
 
 	// Create application with options
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:     "P2P Market Data",
 		Width:     1280,
 		Height:    930,
@@ -50,8 +64,8 @@ func main() {
 		OnBeforeClose: app.beforeClose,
 		OnShutdown:    app.shutdown,
 
-		// Enable dev tools in debug mode
-		LogLevel: determineLogLevel(),
+		// Log level driven by configuration, not hardcoded.
+		LogLevel: wailsLogLevel(cfg),
 
 		// Window configuration
 		Windows: &windows.Options{
@@ -85,7 +99,36 @@ func main() {
 	}
 }
 
-func determineLogLevel() logger.LogLevel {
-	// You could make this configurable via environment variables
-	return logger.DEBUG
+// loadWailsConfig tries to load configuration from well-known paths relative to
+// the working directory. If no config file is found it falls back to defaults.
+func loadWailsConfig() (*config.Config, error) {
+	candidates := []string{
+		"./config.yaml",
+		"./config/config.yaml",
+		"./config/db_config.yaml",
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return config.Load(path)
+		}
+	}
+	return config.LoadDefaults()
+}
+
+// wailsLogLevel maps the config log-level string to the Wails logger.LogLevel
+// type.  Defaults to INFO when the level is unrecognised or the config is nil.
+func wailsLogLevel(cfg *config.Config) logger.LogLevel {
+	if cfg == nil {
+		return logger.INFO
+	}
+	switch strings.ToLower(cfg.LogLevel) {
+	case "debug":
+		return logger.DEBUG
+	case "warn", "warning":
+		return logger.WARNING
+	case "error":
+		return logger.ERROR
+	default:
+		return logger.INFO
+	}
 }

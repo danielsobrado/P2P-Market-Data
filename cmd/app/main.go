@@ -86,15 +86,17 @@ func initializeApp(ctx context.Context, cfg *config.Config, logger *zap.Logger) 
 		return nil, fmt.Errorf("initializing database service: %w", err)
 	}
 
-	// Initialize script manager
-	scriptConfig := &config.ScriptConfig{
-		ScriptDir: filepath.Join(*dataDir, "scripts"),
-		// Add other required config fields
+	// Override the script directory when --data-dir is set so the layout is
+	// consistent with the rest of the application.  Only override if the caller
+	// explicitly specified a non-default data directory.
+	scriptsCfg := cfg.Scripts
+	if *dataDir != "./data" {
+		scriptsCfg.ScriptDir = filepath.Join(*dataDir, "scripts")
 	}
 
-	scriptManager, err := scripts.NewScriptManager(scriptConfig, logger)
+	scriptManager, err := scripts.NewScriptManager(&scriptsCfg, logger)
 	if err != nil {
-		logger.Fatal("Failed to initialize script manager", zap.Error(err))
+		return nil, fmt.Errorf("initializing script manager: %w", err)
 	}
 
 	app := &App{
@@ -181,15 +183,6 @@ func loadConfig(path string) (*config.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
-
-	// Set default values
-	if cfg.Database.Port == 0 {
-		cfg.Database.Port = 5433
-	}
-	if cfg.P2P.Port == 0 {
-		cfg.P2P.Port = 4001
-	}
-
 	return cfg, nil
 }
 
