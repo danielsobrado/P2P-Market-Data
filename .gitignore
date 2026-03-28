@@ -10,3 +10,6 @@ data/keys/
 keyfile
 *.exe
 *.exe~
+__pycache__/
+*.pyc
+*.pyo

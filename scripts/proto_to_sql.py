@@ -16,6 +16,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Only allow simple alphanumeric/underscore identifiers to prevent SQL injection.
+_SAFE_IDENTIFIER = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+
+def _quote(name: str) -> str:
+    """Return a safely double-quoted SQL identifier after validation."""
+    if not _SAFE_IDENTIFIER.match(name):
+        raise ValueError(f"Unsafe SQL identifier: {name!r}")
+    return f'"{name}"'
+
 @dataclass
 class Column:
     name: str
@@ -172,15 +182,10 @@ class ProtobufToSQLConverter:
         'timestamp': 'TIMESTAMP',
     }
 
-    # Only allow simple alphanumeric/underscore identifiers to prevent SQL injection.
-    _SAFE_IDENTIFIER = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
-
-    @classmethod
-    def _quote(cls, name: str) -> str:
+    @staticmethod
+    def _quote(name: str) -> str:
         """Return a safely double-quoted SQL identifier after validation."""
-        if not cls._SAFE_IDENTIFIER.match(name):
-            raise ValueError(f"Unsafe SQL identifier: {name!r}")
-        return f'"{name}"'
+        return _quote(name)
 
     def __init__(self, proto_path: str):
         self.proto_path = proto_path
@@ -194,6 +199,12 @@ class ProtobufToSQLConverter:
         
         # Use the proto filename (without extension) as the table name base
         table_name_base = os.path.splitext(os.path.basename(proto_file))[0].lower()
+        if not _SAFE_IDENTIFIER.match(table_name_base):
+            raise ValueError(
+                f"Proto filename {os.path.basename(proto_file)!r} produces an unsafe SQL "
+                f"identifier {table_name_base!r}. Rename the file to use only letters, digits, "
+                f"and underscores (must start with a letter or underscore)."
+            )
         
         with open(proto_file, 'r') as f:
             content = f.read()
@@ -203,6 +214,12 @@ class ProtobufToSQLConverter:
         for match in re.finditer(message_pattern, content, re.MULTILINE | re.DOTALL):
             message_name = match.group(1)
             message_body = match.group(2)
+
+            if not _SAFE_IDENTIFIER.match(message_name):
+                logger.warning(
+                    f"Skipping message {message_name!r}: name is not a valid SQL identifier."
+                )
+                continue
             
             # For the main message, use the proto filename as table name
             table_name = (table_name_base if message_name.lower() == 'root' 
@@ -231,6 +248,13 @@ class ProtobufToSQLConverter:
                 )
                 if field_match:
                     modifier, field_type, field_name, number = field_match.groups()
+
+                    if not _SAFE_IDENTIFIER.match(field_name):
+                        logger.warning(
+                            f"Skipping field {field_name!r} in message {message_name!r}: "
+                            f"name is not a valid SQL identifier."
+                        )
+                        continue
                     
                     if modifier == 'repeated':
                         # Create a separate table for repeated fields
@@ -285,6 +309,11 @@ class SchemaManager:
         self.conn = self._connect_db()
         self.db_schema = DatabaseSchema(self.conn)
 
+    @staticmethod
+    def _quote(name: str) -> str:
+        """Return a safely double-quoted SQL identifier after validation."""
+        return _quote(name)
+
     def _connect_db(self) -> connection:
         """Establish database connection."""
         try:
@@ -329,13 +358,17 @@ class SchemaManager:
             """
         ]
 
-        # Add foreign key constraints.
-        # Note: PostgreSQL does not support ADD CONSTRAINT IF NOT EXISTS, so these
-        # statements will fail on re-runs if the constraint already exists.  The
-        # migration should be wrapped in idempotent logic by the caller when needed.
-        for fk in table.foreign_keys:
+        # PostgreSQL does not support ADD CONSTRAINT IF NOT EXISTS directly.
+        # Wrap each ADD CONSTRAINT in a DO block that silently ignores
+        # duplicate_object errors so the migration is safe to re-run.
+        for i, fk in enumerate(table.foreign_keys):
+            constraint_name = f"fk_{table.name}_{i}"
             statements.append(
-                f"ALTER TABLE {self._quote(table.name)} ADD CONSTRAINT fk_{table.name} {fk};"
+                f"DO $$ BEGIN\n"
+                f"    ALTER TABLE {self._quote(table.name)} "
+                f"ADD CONSTRAINT {constraint_name} {fk};\n"
+                f"EXCEPTION WHEN duplicate_object THEN NULL;\n"
+                f"END $$;"
             )
 
         return statements
@@ -348,13 +381,13 @@ class SchemaManager:
         current_cols = {col.name: col for col in current.columns}
         new_cols = {col.name: col for col in new.columns}
         
-        # Add new columns
+        # Add new columns using IF NOT EXISTS so the statement is safe to re-run.
         for col_name, col in new_cols.items():
             if col_name not in current_cols:
                 nullable = "NULL" if col.is_nullable else "NOT NULL"
                 statements.append(
-                    f"ALTER TABLE {self._quote(current.name)} ADD COLUMN {self._quote(col_name)} "
-                    f"{col.data_type} {nullable};"
+                    f"ALTER TABLE {self._quote(current.name)} ADD COLUMN IF NOT EXISTS "
+                    f"{self._quote(col_name)} {col.data_type} {nullable};"
                 )
         
         # Modify existing columns
@@ -370,12 +403,21 @@ class SchemaManager:
                         f"ALTER COLUMN {self._quote(col_name)} SET {nullable};"
                     )
         
-        # Add new foreign keys
+        # Add new foreign keys wrapped in idempotent DO blocks.
+        # Use len(current_fks) as a base offset so new constraint names do not
+        # collide with existing ones that were named fk_{table}_0, _1, … in
+        # earlier migration runs.
         current_fks = set(current.foreign_keys)
         new_fks = set(new.foreign_keys)
-        for fk in new_fks - current_fks:
+        base = len(current_fks)
+        for i, fk in enumerate(sorted(new_fks - current_fks)):
+            constraint_name = f"fk_{current.name}_{base + i}"
             statements.append(
-                f"ALTER TABLE {self._quote(current.name)} ADD CONSTRAINT fk_{current.name}_{len(statements)} {fk};"
+                f"DO $$ BEGIN\n"
+                f"    ALTER TABLE {self._quote(current.name)} "
+                f"ADD CONSTRAINT {constraint_name} {fk};\n"
+                f"EXCEPTION WHEN duplicate_object THEN NULL;\n"
+                f"END $$;"
             )
 
         return statements
