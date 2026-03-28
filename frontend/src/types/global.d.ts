@@ -25,6 +25,14 @@ export interface ScriptUploadData {
   version?: string
 }
 
+export interface ServerStatus {
+  running: boolean
+  databaseConnected: boolean
+  p2pHostRunning: boolean
+  scriptMgrRunning: boolean
+  embeddedDbRunning: boolean
+}
+
 export {}
 
 declare global {
@@ -56,6 +64,9 @@ declare global {
           GetPeers: () => Promise<Peer[]>;
           DisconnectPeer: (peerId: string) => Promise<void>;
           
+          // Status
+          GetServerStatus: () => Promise<ServerStatus>;
+
           // Error handling
           ResetDataConnection: () => Promise<void>;
           ResetDataProcessing: () => Promise<void>;
