@@ -2,6 +2,8 @@ package voting
 
 import (
 	"context"
+	"net"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +17,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+func getFreeTCPPort(t *testing.T) int {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	return listener.Addr().(*net.TCPAddr).Port
+}
 
 // MockRepository implements the data.Repository interface for testing
 type MockRepository struct{}
@@ -169,10 +181,12 @@ func TestVotingSystem_StartVoting_Success(t *testing.T) {
 			VotingTimeout:    5 * time.Second,
 			MinVoters:        1,
 			ValidationQuorum: 0.5,
-			Port:             0, // Use any available port for testing
+			Port:             getFreeTCPPort(t),
 		},
 		Security: config.SecurityConfig{
-			KeyFile: "", // Use an empty string or a test key file path
+			KeyFile:       filepath.Join(t.TempDir(), "host.key"),
+			MaxPenalty:    0.5,
+			MinConfidence: 0.5,
 		},
 	}
 

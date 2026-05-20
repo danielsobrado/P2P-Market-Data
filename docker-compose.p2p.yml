@@ -1,0 +1,34 @@
+services:
+  p2p-node-1:
+    build:
+      context: .
+    environment:
+      NODE_NAME: p2p-node-1
+      NODE_HTTP_ADDR: :8080
+      P2P_PORT: 9000
+      P2P_KEY_FILE: /data/host.key
+      LOG_LEVEL: debug
+    ports:
+      - "18080:8080"
+      - "19000:9000"
+    volumes:
+      - p2p-node-1-data:/data
+
+  p2p-node-2:
+    build:
+      context: .
+    environment:
+      NODE_NAME: p2p-node-2
+      NODE_HTTP_ADDR: :8080
+      P2P_PORT: 9000
+      P2P_KEY_FILE: /data/host.key
+      LOG_LEVEL: debug
+    ports:
+      - "18081:8080"
+      - "19001:9000"
+    volumes:
+      - p2p-node-2-data:/data
+
+volumes:
+  p2p-node-1-data:
+  p2p-node-2-data:

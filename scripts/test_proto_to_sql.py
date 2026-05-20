@@ -301,6 +301,51 @@ class TestAlterTableStatements:
         fk_stmts = [s for s in stmts if "ADD CONSTRAINT" in s]
         assert len(fk_stmts) == 0
 
+    def test_serial_matches_information_schema_integer(self):
+        current = Table(
+            name="t",
+            columns=[Column(name="id", data_type="INTEGER", is_nullable=False, is_primary_key=True)],
+            foreign_keys=[],
+        )
+        new = Table(
+            name="t",
+            columns=[Column(name="id", data_type="SERIAL", is_nullable=False, is_primary_key=True)],
+            foreign_keys=[],
+        )
+        stmts = SchemaManager._alter_table_statements(self._mgr(), current, new)
+        assert stmts == []
+
+    def test_nullable_change_to_optional_drops_not_null(self):
+        current = Table(
+            name="t",
+            columns=[Column(name="symbol", data_type="TEXT", is_nullable=False)],
+            foreign_keys=[],
+        )
+        new = Table(
+            name="t",
+            columns=[Column(name="symbol", data_type="TEXT", is_nullable=True)],
+            foreign_keys=[],
+        )
+        stmts = SchemaManager._alter_table_statements(self._mgr(), current, new)
+        assert len(stmts) == 1
+        assert 'ALTER COLUMN "symbol" DROP NOT NULL' in stmts[0]
+        assert "SET NULL" not in stmts[0]
+
+    def test_nullable_change_to_required_sets_not_null(self):
+        current = Table(
+            name="t",
+            columns=[Column(name="symbol", data_type="TEXT", is_nullable=True)],
+            foreign_keys=[],
+        )
+        new = Table(
+            name="t",
+            columns=[Column(name="symbol", data_type="TEXT", is_nullable=False)],
+            foreign_keys=[],
+        )
+        stmts = SchemaManager._alter_table_statements(self._mgr(), current, new)
+        assert len(stmts) == 1
+        assert 'ALTER COLUMN "symbol" SET NOT NULL' in stmts[0]
+
     def test_no_change_produces_no_statements(self):
         current = self._base_table()
         new = self._base_table()

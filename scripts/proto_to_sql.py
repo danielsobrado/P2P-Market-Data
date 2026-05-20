@@ -18,6 +18,19 @@ logger = logging.getLogger(__name__)
 
 # Only allow simple alphanumeric/underscore identifiers to prevent SQL injection.
 _SAFE_IDENTIFIER = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+_TYPE_ALIASES = {
+    'SERIAL': 'INTEGER',
+    'SERIAL4': 'INTEGER',
+    'BIGSERIAL': 'BIGINT',
+    'SERIAL8': 'BIGINT',
+    'SMALLSERIAL': 'SMALLINT',
+    'SERIAL2': 'SMALLINT',
+    'INT': 'INTEGER',
+    'INT4': 'INTEGER',
+    'INT8': 'BIGINT',
+    'BOOL': 'BOOLEAN',
+    'TIMESTAMP WITHOUT TIME ZONE': 'TIMESTAMP',
+}
 
 
 def _quote(name: str) -> str:
@@ -25,6 +38,17 @@ def _quote(name: str) -> str:
     if not _SAFE_IDENTIFIER.match(name):
         raise ValueError(f"Unsafe SQL identifier: {name!r}")
     return f'"{name}"'
+
+
+def _normalize_data_type(data_type: str) -> str:
+    """Normalize SQL type spellings for comparison with information_schema."""
+    normalized = " ".join(data_type.upper().split())
+    return _TYPE_ALIASES.get(normalized, normalized)
+
+
+def _cast_data_type(data_type: str) -> str:
+    """Return a legal PostgreSQL cast target for a generated SQL type."""
+    return _normalize_data_type(data_type)
 
 @dataclass
 class Column:
@@ -394,13 +418,23 @@ class SchemaManager:
         for col_name, new_col in new_cols.items():
             if col_name in current_cols:
                 current_col = current_cols[col_name]
-                if (new_col.data_type != current_col.data_type or
-                    new_col.is_nullable != current_col.is_nullable):
-                    nullable = "NULL" if new_col.is_nullable else "NOT NULL"
+                type_changed = (
+                    _normalize_data_type(new_col.data_type)
+                    != _normalize_data_type(current_col.data_type)
+                )
+                nullable_changed = new_col.is_nullable != current_col.is_nullable
+                if type_changed or nullable_changed:
+                    clauses = []
+                    if type_changed:
+                        clauses.append(
+                            f"ALTER COLUMN {self._quote(col_name)} TYPE {new_col.data_type} "
+                            f"USING {self._quote(col_name)}::{_cast_data_type(new_col.data_type)}"
+                        )
+                    if nullable_changed:
+                        null_action = "DROP NOT NULL" if new_col.is_nullable else "SET NOT NULL"
+                        clauses.append(f"ALTER COLUMN {self._quote(col_name)} {null_action}")
                     statements.append(
-                        f"ALTER TABLE {self._quote(current.name)} ALTER COLUMN {self._quote(col_name)} "
-                        f"TYPE {new_col.data_type} USING {self._quote(col_name)}::{new_col.data_type}, "
-                        f"ALTER COLUMN {self._quote(col_name)} SET {nullable};"
+                        f"ALTER TABLE {self._quote(current.name)} {', '.join(clauses)};"
                     )
         
         # Add new foreign keys wrapped in idempotent DO blocks.

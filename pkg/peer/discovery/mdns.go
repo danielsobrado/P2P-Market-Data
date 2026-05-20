@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	"go.uber.org/zap"
@@ -185,35 +185,35 @@ func (m *MDNSDiscovery) IsRunning() bool {
 
 // GetConnectedPeers returns a list of currently connected peers discovered via mDNS
 func (md *MDNSDiscovery) GetConnectedPeers() []peer.ID {
-    if (!md.running) {
-        return nil
-    }
+	if !md.running {
+		return nil
+	}
 
-    md.mu.RLock()
-    defer md.mu.RUnlock()
+	md.mu.RLock()
+	defer md.mu.RUnlock()
 
-    result := make([]peer.ID, 0, len(md.localPeers))
-    for peerID := range md.localPeers {
-        // Skip self
-        if (peerID == md.host.ID()) {
-            continue
-        }
-        // Only include if still connected
-        if (md.host.Network().Connectedness(peerID) == network.Connected) {
-            result = append(result, peerID)
-        }
-    }
+	result := make([]peer.ID, 0, len(md.localPeers))
+	for peerID := range md.localPeers {
+		// Skip self
+		if peerID == md.host.ID() {
+			continue
+		}
+		// Only include if still connected
+		if md.host.Network().Connectedness(peerID) == network.Connected {
+			result = append(result, peerID)
+		}
+	}
 
-    return result
+	return result
 }
 
 // IsConnected checks if a specific peer is connected
 func (md *MDNSDiscovery) IsConnected(id peer.ID) bool {
-    if (!md.running) {
-        return false
-    }
-    md.mu.RLock()
-    _, exists := md.localPeers[id]
-    md.mu.RUnlock()
-    return exists && md.host.Network().Connectedness(id) == network.Connected
+	if !md.running {
+		return false
+	}
+	md.mu.RLock()
+	_, exists := md.localPeers[id]
+	md.mu.RUnlock()
+	return exists && md.host.Network().Connectedness(id) == network.Connected
 }

@@ -44,6 +44,20 @@ func TestHostStop_IdempotentWhenNotRunning(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestHostStart_GuardStopped verifies that a stopped host instance cannot be
+// restarted after Stop has closed its underlying libp2p resources.
+func TestHostStart_GuardStopped(t *testing.T) {
+	h := &Host{
+		stopped: true,
+		logger:  zaptest.NewLogger(t),
+		status:  NewStatus(),
+	}
+
+	err := h.Start(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stopped")
+}
+
 // TestHostStart_ConcurrentGuard verifies that, under concurrent Start()
 // calls on an already-running host, every caller receives an error and
 // no data race is introduced.  Run with: go test -race ./pkg/p2p/host/...

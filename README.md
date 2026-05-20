@@ -58,6 +58,27 @@ wails build
 
 When the Wails app starts its embedded PostgreSQL instance, it now initializes the required schema automatically.
 
+## Docker P2P Smoke Test
+
+The repository includes a headless node for testing P2P market-data exchange between containers.
+
+```powershell
+.\scripts\docker_p2p_smoke.ps1
+```
+
+The script builds two Docker services, connects `p2p-node-2` to `p2p-node-1`, publishes a `BTCUSD` market-data record on node 1, and verifies that node 2 receives and stores it over libp2p pubsub.
+
+Manual flow:
+
+```powershell
+docker compose -f docker-compose.p2p.yml up -d --build
+$node1 = Invoke-RestMethod http://localhost:18080/status
+$addr = "/dns4/p2p-node-1/tcp/9000/p2p/$($node1.peer_id)"
+Invoke-RestMethod http://localhost:18081/connect -Method Post -ContentType "application/json" -Body (@{addr=$addr} | ConvertTo-Json)
+Invoke-RestMethod http://localhost:18080/market-data -Method Post -ContentType "application/json" -Body '{"symbol":"BTCUSD","price":50000,"volume":12,"source":"manual","data_type":"EOD"}'
+Invoke-RestMethod "http://localhost:18081/market-data?symbol=BTCUSD"
+```
+
 ## Directory Structure
 
 ```plaintext

@@ -5,6 +5,8 @@ frontend/node_modules/
 /dist/
 .cache/
 build/bin/
+build/docker/
+.docker-test-config/
 data/keys/
 *.key
 keyfile

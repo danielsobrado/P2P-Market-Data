@@ -19,6 +19,7 @@ import (
 	libp2pNetwork "github.com/libp2p/go-libp2p/core/network"
 	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	libp2pProtocol "github.com/libp2p/go-libp2p/core/protocol"
+	multiaddr "github.com/multiformats/go-multiaddr"
 	"go.uber.org/zap"
 )
 
@@ -45,10 +46,12 @@ type Host struct {
 	pubsub    *pubsub.PubSub
 	topics    map[string]*pubsub.Topic
 	subs      map[string]*pubsub.Subscription
+	repo      data.Repository
 	peerStore *PeerStore
 	validator *security.Validator
 	logger    *zap.Logger
 	running   bool
+	stopped   bool
 
 	// Channels for coordination
 	shutdown   chan struct{}
@@ -128,6 +131,7 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 		pubsub:     ps,
 		topics:     make(map[string]*pubsub.Topic),
 		subs:       make(map[string]*pubsub.Subscription),
+		repo:       repo,
 		peerStore:  peerStore,
 		validator:  validator,
 		logger:     logger,
@@ -164,6 +168,10 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 // Start begins P2P network operations
 func (h *Host) Start(ctx context.Context) error {
 	h.mu.Lock()
+	if h.stopped {
+		h.mu.Unlock()
+		return fmt.Errorf("host has been stopped")
+	}
 	if h.running {
 		h.mu.Unlock()
 		return fmt.Errorf("host is already running")
@@ -171,7 +179,7 @@ func (h *Host) Start(ctx context.Context) error {
 	// Mark as running while still holding the lock so that concurrent
 	// callers cannot both observe running==false and proceed with startup.
 	h.running = true
-	h.mu.Unlock()
+	defer h.mu.Unlock()
 
 	h.logger.Info("Starting P2P host",
 		zap.String("peerID", h.host.ID().String()),
@@ -204,12 +212,13 @@ func (h *Host) Stop() error {
 		return nil
 	}
 	h.running = false
-	h.mu.Unlock()
 
 	h.logger.Info("Stopping P2P host")
 
 	// Signal shutdown
-	close(h.shutdown)
+	if h.shutdown != nil {
+		close(h.shutdown)
+	}
 
 	// Close subscriptions
 	for _, sub := range h.subs {
@@ -230,8 +239,13 @@ func (h *Host) Stop() error {
 		}
 	}
 	if err := h.host.Close(); err != nil {
+		h.stopped = true
+		h.mu.Unlock()
 		return fmt.Errorf("failed to close libp2p host: %w", err)
 	}
+
+	h.stopped = true
+	h.mu.Unlock()
 
 	h.logger.Info("P2P host stopped")
 	return nil
@@ -328,6 +342,50 @@ func (h *Host) DisconnectPeer(peerID libp2pPeer.ID) error {
 // ID returns the peer ID of the host
 func (h *Host) ID() libp2pPeer.ID {
 	return h.host.ID()
+}
+
+// Addrs returns the host's listen addresses without the peer ID suffix.
+func (h *Host) Addrs() []string {
+	addrs := h.host.Addrs()
+	result := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		result = append(result, addr.String())
+	}
+	return result
+}
+
+// FullAddrs returns dialable multiaddrs with the host peer ID appended.
+func (h *Host) FullAddrs() []string {
+	peerID := h.host.ID().String()
+	addrs := h.host.Addrs()
+	result := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		result = append(result, fmt.Sprintf("%s/p2p/%s", addr.String(), peerID))
+	}
+	return result
+}
+
+// Connect dials a peer by full /p2p multiaddr.
+func (h *Host) Connect(ctx context.Context, addr string) error {
+	maddr, err := multiaddr.NewMultiaddr(addr)
+	if err != nil {
+		return fmt.Errorf("invalid peer multiaddr: %w", err)
+	}
+	info, err := libp2pPeer.AddrInfoFromP2pAddr(maddr)
+	if err != nil {
+		return fmt.Errorf("parsing peer info: %w", err)
+	}
+	return h.host.Connect(ctx, *info)
+}
+
+// ConnectedPeers returns the IDs of currently connected peers.
+func (h *Host) ConnectedPeers() []string {
+	peers := h.host.Network().Peers()
+	result := make([]string, 0, len(peers))
+	for _, peerID := range peers {
+		result = append(result, peerID.String())
+	}
+	return result
 }
 
 // SetStreamHandler sets a handler for a specific protocol
@@ -462,7 +520,14 @@ func (h *Host) handleMarketDataMessage(msg *message.Message) {
 		zap.String("symbol", marketData.Symbol),
 		zap.Float64("price", marketData.Price))
 
-	// Optionally store or process the market data
+	if h.repo != nil {
+		if err := h.repo.SaveMarketData(context.Background(), marketData); err != nil && err != data.ErrDuplicate {
+			h.logger.Warn("Failed to store received market data",
+				zap.String("id", marketData.ID),
+				zap.String("symbol", marketData.Symbol),
+				zap.Error(err))
+		}
+	}
 }
 
 // handleValidationRequestMessage handles incoming validation requests
@@ -520,8 +585,25 @@ func (h *Host) handleValidationRequest(ctx context.Context, req *message.Validat
 
 // connectToBootstrapPeers connects to bootstrap peers
 func (h *Host) connectToBootstrapPeers(ctx context.Context) error {
-	// Implement bootstrap peer connection
-	// For example, read a list of bootstrap peers from the config and connect to them
+	if h.cfg == nil || len(h.cfg.BootstrapPeers) == 0 {
+		return nil
+	}
+
+	var lastErr error
+	connected := 0
+	for _, addr := range h.cfg.BootstrapPeers {
+		if err := h.Connect(ctx, addr); err != nil {
+			lastErr = err
+			h.logger.Warn("Failed to connect bootstrap peer",
+				zap.String("addr", addr),
+				zap.Error(err))
+			continue
+		}
+		connected++
+	}
+	if connected == 0 && lastErr != nil {
+		return lastErr
+	}
 	return nil
 }
 

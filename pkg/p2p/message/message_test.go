@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"p2p_market_data/pkg/data"
+
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,6 +112,36 @@ func TestMarshalWithoutSignature_SignatureChangeDoesNotAffectPayload(t *testing.
 	require.NoError(t, err)
 
 	assert.True(t, bytes.Equal(b1, b2), "changing only the Signature must not affect the signed payload")
+}
+
+func TestMarshalWithoutSignature_StableAfterWireRoundTrip(t *testing.T) {
+	senderID, err := peer.Decode("QmYwAPJzv5CZsnAzt8auVZRn3LZ8hZaS1wZ4qR3HYB5g1S")
+	require.NoError(t, err)
+
+	payload, err := data.NewMarketData("BTCUSD", 50000, 12, "test", data.DataTypeEOD)
+	require.NoError(t, err)
+
+	msg := NewMessage(MarketDataMessage, payload)
+	msg.SenderID = senderID
+	msg.Signature = []byte("wire-signature")
+
+	before, err := msg.MarshalWithoutSignature()
+	require.NoError(t, err)
+
+	wireBytes, err := msg.Marshal()
+	require.NoError(t, err)
+
+	var decoded Message
+	require.NoError(t, decoded.Unmarshal(wireBytes))
+
+	after, err := decoded.MarshalWithoutSignature()
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(before, after), "signed payload bytes must survive wire round trip")
+
+	var decodedPayload data.MarketData
+	require.NoError(t, decoded.DecodeData(&decodedPayload))
+	assert.Equal(t, payload.ID, decodedPayload.ID)
+	assert.Equal(t, payload.Symbol, decodedPayload.Symbol)
 }
 
 // TestNewMessage_FieldsPopulated verifies that NewMessage populates all

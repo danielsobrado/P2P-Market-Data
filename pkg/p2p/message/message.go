@@ -70,7 +70,29 @@ func (m *Message) MarshalWithoutSignature() ([]byte, error) {
 
 // Unmarshal deserializes the message
 func (m *Message) Unmarshal(data []byte) error {
-	return json.Unmarshal(data, m)
+	type wireMessage struct {
+		Type      MessageType     `json:"type"`
+		Version   string          `json:"version"`
+		ID        string          `json:"id"`
+		Timestamp time.Time       `json:"timestamp"`
+		SenderID  peer.ID         `json:"sender_id"`
+		Data      json.RawMessage `json:"data"`
+		Signature []byte          `json:"signature,omitempty"`
+	}
+
+	var wire wireMessage
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+
+	m.Type = wire.Type
+	m.Version = wire.Version
+	m.ID = wire.ID
+	m.Timestamp = wire.Timestamp
+	m.SenderID = wire.SenderID
+	m.Data = wire.Data
+	m.Signature = wire.Signature
+	return nil
 }
 
 // ValidationRequest represents a validation request

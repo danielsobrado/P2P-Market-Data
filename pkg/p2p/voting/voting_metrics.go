@@ -48,6 +48,11 @@ func (vm *VotingMetrics) IncrementSessionsFailed() {
 func (vm *VotingMetrics) UpdateAverageLatency(latency time.Duration) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
+	if vm.averageLatency == 0 {
+		vm.averageLatency = latency
+		vm.lastUpdate = time.Now()
+		return
+	}
 	alpha := 0.1
 	vm.averageLatency = time.Duration(float64(vm.averageLatency)*(1-alpha) + float64(latency)*alpha)
 	vm.lastUpdate = time.Now()

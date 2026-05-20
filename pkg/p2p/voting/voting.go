@@ -8,14 +8,14 @@ import (
 
 	"p2p_market_data/pkg/config"
 	"p2p_market_data/pkg/data"
-	"p2p_market_data/pkg/p2p/message"
 	"p2p_market_data/pkg/p2p/host"
+	"p2p_market_data/pkg/p2p/message"
 
 	"go.uber.org/zap"
 )
 
 const (
-	ValidationTopic = "validation"
+	ValidationTopic = host.ValidationTopic
 )
 
 // VotingSystem manages the consensus voting process
