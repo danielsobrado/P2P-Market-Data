@@ -1,5 +1,25 @@
 export namespace data {
 	
+	export class DataRequest {
+	    type: string;
+	    symbol: string;
+	    start_date: string;
+	    end_date: string;
+	    granularity: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DataRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.symbol = source["symbol"];
+	        this.start_date = source["start_date"];
+	        this.end_date = source["end_date"];
+	        this.granularity = source["granularity"];
+	    }
+	}
 	export class DataSource {
 	    id: string;
 	    peer_id: string;
@@ -59,7 +79,7 @@ export namespace data {
 	    validation_score: number;
 	    up_votes: number;
 	    down_votes: number;
-	    metadata: {[key: string]: string};
+	    metadata: Record<string, string>;
 	    amount: number;
 	    currency: string;
 	    // Go type: time
@@ -129,7 +149,7 @@ export namespace data {
 	    validation_score: number;
 	    up_votes: number;
 	    down_votes: number;
-	    metadata: {[key: string]: string};
+	    metadata: Record<string, string>;
 	    open: number;
 	    high: number;
 	    low: number;
@@ -181,6 +201,72 @@ export namespace data {
 		    return a;
 		}
 	}
+	export class InsiderTrade {
+	    id: string;
+	    symbol: string;
+	    // Go type: time
+	    timestamp: any;
+	    source: string;
+	    data_type: string;
+	    validation_score: number;
+	    up_votes: number;
+	    down_votes: number;
+	    metadata: Record<string, string>;
+	    insider_name: string;
+	    insider_title: string;
+	    trade_type: string;
+	    // Go type: time
+	    trade_date: any;
+	    position: string;
+	    shares: number;
+	    price_per_share: number;
+	    value: number;
+	    transaction_type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InsiderTrade(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.symbol = source["symbol"];
+	        this.timestamp = this.convertValues(source["timestamp"], null);
+	        this.source = source["source"];
+	        this.data_type = source["data_type"];
+	        this.validation_score = source["validation_score"];
+	        this.up_votes = source["up_votes"];
+	        this.down_votes = source["down_votes"];
+	        this.metadata = source["metadata"];
+	        this.insider_name = source["insider_name"];
+	        this.insider_title = source["insider_title"];
+	        this.trade_type = source["trade_type"];
+	        this.trade_date = this.convertValues(source["trade_date"], null);
+	        this.position = source["position"];
+	        this.shares = source["shares"];
+	        this.price_per_share = source["price_per_share"];
+	        this.value = source["value"];
+	        this.transaction_type = source["transaction_type"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class MarketData {
 	    id: string;
 	    symbol: string;
@@ -190,8 +276,8 @@ export namespace data {
 	    timestamp: any;
 	    source: string;
 	    data_type: string;
-	    signatures: {[key: string]: uint8[]};
-	    metadata?: {[key: string]: string};
+	    signatures: Record<string, Array<number>>;
+	    metadata?: Record<string, string>;
 	    validation_score: number;
 	    hash: string;
 	    // Go type: time
@@ -239,7 +325,17 @@ export namespace data {
 		}
 	}
 	export class MarketDataFilter {
-	
+	    Symbol: string;
+	    MinPrice?: number;
+	    MaxPrice?: number;
+	    // Go type: time
+	    FromTime?: any;
+	    // Go type: time
+	    ToTime?: any;
+	    Source: string;
+	    DataType: string;
+	    Limit: number;
+	    Offset: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new MarketDataFilter(source);
@@ -247,8 +343,34 @@ export namespace data {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+	        this.Symbol = source["Symbol"];
+	        this.MinPrice = source["MinPrice"];
+	        this.MaxPrice = source["MaxPrice"];
+	        this.FromTime = this.convertValues(source["FromTime"], null);
+	        this.ToTime = this.convertValues(source["ToTime"], null);
+	        this.Source = source["Source"];
+	        this.DataType = source["DataType"];
+	        this.Limit = source["Limit"];
+	        this.Offset = source["Offset"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Peer {
 	    id: string;
@@ -264,7 +386,7 @@ export namespace data {
 	    // Go type: time
 	    updated_at: any;
 	    status: string;
-	    metadata?: {[key: string]: any};
+	    metadata?: Record<string, any>;
 	
 	    static createFrom(source: any = {}) {
 	        return new Peer(source);
@@ -308,6 +430,68 @@ export namespace data {
 
 export namespace main {
 	
+	export class ActiveTransfer {
+	    id: string;
+	    type: string;
+	    symbol: string;
+	    source: string;
+	    destination: string;
+	    progress: number;
+	    status: string;
+	    startTime: string;
+	    endTime?: string;
+	    size: number;
+	    speed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ActiveTransfer(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
+	        this.symbol = source["symbol"];
+	        this.source = source["source"];
+	        this.destination = source["destination"];
+	        this.progress = source["progress"];
+	        this.status = source["status"];
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
+	        this.size = source["size"];
+	        this.speed = source["speed"];
+	    }
+	}
+	export class ScriptInfo {
+	    id: string;
+	    name: string;
+	    description: string;
+	    author: string;
+	    version: string;
+	    size: number;
+	    created: string;
+	    updated: string;
+	    status: string;
+	    isInstalled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScriptInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.author = source["author"];
+	        this.version = source["version"];
+	        this.size = source["size"];
+	        this.created = source["created"];
+	        this.updated = source["updated"];
+	        this.status = source["status"];
+	        this.isInstalled = source["isInstalled"];
+	    }
+	}
 	export class ServerStatus {
 	    running: boolean;
 	    databaseConnected: boolean;

@@ -341,6 +341,43 @@ func (e *ScriptExecutor) ExecuteScriptWithOutputCapture(ctx context.Context, scr
 	return result, nil
 }
 
+// StartScriptAsync launches script execution in the background and returns
+// immediately so callers can stop long-running scripts while they execute.
+func (e *ScriptExecutor) StartScriptAsync(ctx context.Context, scriptPath string, args []string) error {
+	if e.IsScriptRunning(scriptPath) {
+		return fmt.Errorf("script already running: %s", scriptPath)
+	}
+	if err := e.validateScript(scriptPath); err != nil {
+		return fmt.Errorf("script validation failed: %w", err)
+	}
+	env, err := e.prepareEnvironment()
+	if err != nil {
+		return fmt.Errorf("preparing environment: %w", err)
+	}
+
+	go func() {
+		result, runErr := e.runScript(ctx, scriptPath, args, env)
+		if runErr != nil {
+			e.logger.Error("async script execution failed",
+				zap.String("scriptPath", scriptPath),
+				zap.Error(runErr))
+			return
+		}
+		e.updateMetrics(result)
+		e.logger.Info("async script execution completed",
+			zap.String("scriptPath", scriptPath),
+			zap.Int("exitCode", result.ExitCode))
+	}()
+
+	return nil
+}
+
+// IsScriptRunning reports whether a script at the given path is currently executing.
+func (e *ScriptExecutor) IsScriptRunning(scriptPath string) bool {
+	_, exists := e.runningScripts.Load(scriptPath)
+	return exists
+}
+
 // StopScript stops a running script by ID using graceful→timeout→force-kill.
 // It waits for the background cmd.Wait() goroutine to finish so there is no
 // double-Wait() race condition.

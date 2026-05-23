@@ -99,13 +99,13 @@ export function useMarketData<T>(
       let response: T[]
       switch (type) {
         case 'EOD':
-          response = await window.go.main.App.GetEODData(symbol, startDate, endDate)
+          response = (await window.go.main.App.GetEODData(symbol, startDate, endDate)) as T[]
           break
         case 'DIVIDEND':
-          response = await window.go.main.App.GetDividendData(symbol, startDate, endDate)
+          response = (await window.go.main.App.GetDividendData(symbol, startDate, endDate)) as T[]
           break
         case 'INSIDER_TRADE':
-          response = await window.go.main.App.GetInsiderData(symbol, startDate, endDate)
+          response = (await window.go.main.App.GetInsiderData(symbol, startDate, endDate)) as T[]
           break
         default:
           throw new Error(`Unsupported data type: ${type}`)

@@ -49,6 +49,20 @@ type ServerStatus struct {
 	EmbeddedDBRunning bool `json:"embeddedDbRunning"`
 }
 
+// ScriptInfo is a frontend-facing script list payload.
+type ScriptInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Author      string `json:"author"`
+	Version     string `json:"version"`
+	Size        int64  `json:"size"`
+	Created     string `json:"created"`
+	Updated     string `json:"updated"`
+	Status      string `json:"status"`
+	IsInstalled bool   `json:"isInstalled"`
+}
+
 // ActiveTransfer is a frontend-facing transfer status payload.
 type ActiveTransfer struct {
 	ID          string  `json:"id"`
@@ -288,8 +302,10 @@ func (a *App) shutdown(ctx context.Context) {
 // Script management methods
 
 func (a *App) RunScript(scriptID string) error {
-	_, err := a.scriptMgr.ExecuteScript(a.ctx, scriptID, nil)
-	return err
+	if a.scriptMgr == nil {
+		return errors.New("script manager not initialized")
+	}
+	return a.scriptMgr.StartScript(a.ctx, scriptID, nil)
 }
 
 func (a *App) StopScript(scriptID string) error {
@@ -299,6 +315,35 @@ func (a *App) StopScript(scriptID string) error {
 	}
 	scriptPath := filepath.Join(a.config.Scripts.ScriptDir, script.Name)
 	return a.scriptMgr.Executor.StopScript(scriptPath)
+}
+
+func (a *App) GetScripts() ([]ScriptInfo, error) {
+	if a.scriptMgr == nil {
+		return nil, errors.New("script manager not initialized")
+	}
+
+	scripts := a.scriptMgr.ListScripts()
+	result := make([]ScriptInfo, 0, len(scripts))
+	for _, s := range scripts {
+		scriptPath := filepath.Join(a.config.Scripts.ScriptDir, s.Name)
+		status := "idle"
+		if a.scriptMgr.Executor.IsScriptRunning(scriptPath) {
+			status = "running"
+		}
+		result = append(result, ScriptInfo{
+			ID:          s.ID,
+			Name:        s.Name,
+			Description: s.Description,
+			Author:      s.Author,
+			Version:     s.Version,
+			Size:        s.Size,
+			Created:     s.Created.Format(time.RFC3339),
+			Updated:     s.Updated.Format(time.RFC3339),
+			Status:      status,
+			IsInstalled: true,
+		})
+	}
+	return result, nil
 }
 
 func (a *App) GetScriptContent(scriptID string) (string, error) {

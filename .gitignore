@@ -12,6 +12,7 @@ data/keys/
 keyfile
 *.exe
 *.exe~
+*.syso
 __pycache__/
 *.pyc
 *.pyo

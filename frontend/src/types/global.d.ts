@@ -12,9 +12,26 @@ export interface Peer {
   id: string
   address: string
   reputation: number
-  isConnected: boolean
-  lastSeen: string
+  isConnected?: boolean
+  lastSeen?: string
+  last_seen?: string
+  is_authority?: boolean
+  isAuthority?: boolean
   roles: string[]
+  status?: string
+}
+
+export interface ScriptInfo {
+  id: string
+  name: string
+  description: string
+  author: string
+  version: string
+  size: number
+  created: string
+  updated: string
+  status: string
+  isInstalled: boolean
 }
 
 export interface ScriptUploadData {
@@ -52,6 +69,7 @@ declare global {
           GetInsiderData: (symbol: string, startDate: string, endDate: string) => Promise<InsiderTrade[]>;
           
           // Script management
+          GetScripts: () => Promise<ScriptInfo[]>;
           GetScriptContent: (scriptId: string) => Promise<string>;
           UploadScript: (scriptData: ScriptUploadData) => Promise<void>;
           RunScript: (scriptId: string) => Promise<void>;
@@ -62,7 +80,6 @@ declare global {
           
           // Peer management
           GetPeers: () => Promise<Peer[]>;
-          DisconnectPeer: (peerId: string) => Promise<void>;
           
           // Status
           GetServerStatus: () => Promise<ServerStatus>;

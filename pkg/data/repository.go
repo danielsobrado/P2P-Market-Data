@@ -126,6 +126,7 @@ func (r *PostgresRepository) GetPeer(ctx context.Context, id string) (*Peer, err
 		}
 	}
 
+	EnrichPeer(peer)
 	return peer, nil
 }
 
@@ -234,6 +235,7 @@ func (r *PostgresRepository) ListPeers(ctx context.Context, filter PeerFilter) (
 			}
 		}
 
+		EnrichPeer(peer)
 		peers = append(peers, peer)
 	}
 	if err := rows.Err(); err != nil {

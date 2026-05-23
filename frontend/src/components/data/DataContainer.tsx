@@ -43,7 +43,7 @@ export const DataContainer: React.FC = () => {
 
     // The selected code with types:
     const resolvedData = typeof newData === 'function' ? newData(marketData) : newData;
-    window.go.main.App.UpdateMarketData(resolvedData).catch((error: Error) => {
+    window.go.main.App.UpdateMarketData(resolvedData as unknown as import('@/types/marketData').BaseMarketData[]).catch((error: Error) => {
       console.error('Failed to update market data:', error);
     });
   }, [marketData])

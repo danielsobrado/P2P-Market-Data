@@ -195,6 +195,7 @@ func (r *MemoryRepository) GetPeer(ctx context.Context, id string) (*Peer, error
 		return nil, ErrNotFound
 	}
 	copyPeer := *peer
+	EnrichPeer(&copyPeer)
 	return &copyPeer, nil
 }
 
@@ -213,6 +214,7 @@ func (r *MemoryRepository) ListPeers(ctx context.Context, filter PeerFilter) ([]
 			continue
 		}
 		copyPeer := *peer
+		EnrichPeer(&copyPeer)
 		peers = append(peers, &copyPeer)
 	}
 	return peers, nil

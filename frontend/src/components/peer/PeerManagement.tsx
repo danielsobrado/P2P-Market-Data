@@ -73,7 +73,19 @@ export function PeerManagement() {
       await waitForRuntime()
       const response = await window.go.main.App.GetPeers()
       if (mounted) {
-        setPeers(response || [])
+        setPeers(
+          (response || []).map((p) => ({
+            id: p.id,
+            address: p.address,
+            reputation: p.reputation,
+            isConnected:
+              p.isConnected ??
+              (p.status?.toLowerCase() === 'connected' ||
+                p.status?.toLowerCase() === 'online'),
+            lastSeen: p.lastSeen ?? p.last_seen ?? '',
+            roles: p.roles ?? [],
+          })),
+        )
       }
     } catch (err) {
       console.error('Failed to fetch peers:', err)

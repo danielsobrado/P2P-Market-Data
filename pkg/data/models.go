@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -258,6 +259,35 @@ func (p *Peer) UpdateReputation(delta float64) {
 func (p *Peer) UpdateLastSeen() {
 	p.LastSeen = time.Now().UTC()
 	p.UpdatedAt = p.LastSeen
+}
+
+// PeerActiveWindow is how recently a peer must have been seen to count as connected.
+const PeerActiveWindow = 5 * time.Minute
+
+// EnrichPeer populates status and authority from metadata, inferring connection
+// from last_seen when status is absent.
+func EnrichPeer(peer *Peer) {
+	if peer == nil {
+		return
+	}
+	if peer.Metadata != nil {
+		if s, ok := peer.Metadata["status"].(string); ok && s != "" {
+			peer.Status = s
+		}
+		switch v := peer.Metadata["is_authority"].(type) {
+		case bool:
+			peer.IsAuthority = v
+		case string:
+			peer.IsAuthority = strings.EqualFold(v, "true")
+		}
+	}
+	if peer.Status == "" {
+		if !peer.LastSeen.IsZero() && time.Since(peer.LastSeen) <= PeerActiveWindow {
+			peer.Status = "connected"
+		} else {
+			peer.Status = "offline"
+		}
+	}
 }
 
 // Stake represents a peer's stake in the network

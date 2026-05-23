@@ -243,6 +243,20 @@ func (m *ScriptManager) ListScripts() []*ScriptMetadata {
 	return scripts
 }
 
+// StartScript launches a script in the background and returns immediately.
+func (m *ScriptManager) StartScript(ctx context.Context, scriptID string, args []string) error {
+	m.mu.RLock()
+	script, exists := m.scripts[scriptID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("script not found: %s", scriptID)
+	}
+
+	scriptPath := filepath.Join(m.Config.ScriptDir, script.Name)
+	return m.Executor.StartScriptAsync(ctx, scriptPath, args)
+}
+
 // ExecuteScript executes a script by ID
 func (m *ScriptManager) ExecuteScript(ctx context.Context, scriptID string, args []string) (*ExecutionResult, error) {
 	m.mu.RLock()

@@ -55,7 +55,13 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({ scripts, setScripts, onError })
     handleDeleteScript,
     handleInstallScript,
     handleUninstallScript,
-  } = handleScripts({ setScripts, onError })
+  } = handleScripts({
+    setScripts,
+    refreshScripts: async () => {
+      // Legacy tab — list refresh handled by parent when wired
+    },
+    onError,
+  })
 
   // Function to handle the upload and reset form
   const handleUpload = async () => {
