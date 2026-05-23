@@ -111,38 +111,51 @@ func (e *ScriptExecutor) ExecuteScript(ctx context.Context, scriptPath string, a
 	}
 }
 
-// runScript executes the script process
+// runScript executes the script process synchronously through to completion.
 func (e *ScriptExecutor) runScript(ctx context.Context, scriptPath string, args []string, env []string) (*ExecutionResult, error) {
+	run, cmd, stdout, stderr, startTime, err := e.launchScript(ctx, scriptPath, args, env)
+	if err != nil {
+		return nil, err
+	}
+	return e.waitScriptRun(run, scriptPath, cmd, stdout, stderr, startTime)
+}
+
+// launchScript validates uniqueness, registers the run, and starts the process.
+// The entry remains in runningScripts until waitScriptRun completes cleanup.
+func (e *ScriptExecutor) launchScript(ctx context.Context, scriptPath string, args []string, env []string) (*scriptRun, *exec.Cmd, *bytes.Buffer, *bytes.Buffer, time.Time, error) {
 	startTime := time.Now()
 
-	// Prepare command
 	cmd := exec.CommandContext(ctx, e.config.PythonPath, append([]string{scriptPath}, args...)...)
 	cmd.Env = env
 
-	// Set up output buffers
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-
-	// Set resource limits
 	cmd.SysProcAttr = &syscall.SysProcAttr{}
 
-	// Register the run entry before Start so StopScript can find it.
 	run := &scriptRun{cmd: cmd, done: make(chan struct{})}
-	e.runningScripts.Store(scriptPath, run)
+	if _, loaded := e.runningScripts.LoadOrStore(scriptPath, run); loaded {
+		return nil, nil, nil, nil, time.Time{}, fmt.Errorf("script already running: %s", scriptPath)
+	}
+
+	if err := cmd.Start(); err != nil {
+		close(run.done)
+		e.runningScripts.Delete(scriptPath)
+		return nil, nil, nil, nil, time.Time{}, fmt.Errorf("starting script: %w", err)
+	}
+
+	return run, cmd, &stdout, &stderr, startTime, nil
+}
+
+// waitScriptRun waits for a launched script to finish and removes it from runningScripts.
+func (e *ScriptExecutor) waitScriptRun(run *scriptRun, scriptPath string, cmd *exec.Cmd, stdout, stderr *bytes.Buffer, startTime time.Time) (*ExecutionResult, error) {
 	defer func() {
 		close(run.done)
 		e.runningScripts.Delete(scriptPath)
 	}()
 
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting script: %w", err)
-	}
-
-	// Run script — this is the single authoritative Wait() call.
 	err := cmd.Wait()
 
-	// Prepare result
 	result := &ExecutionResult{
 		ExitCode:  cmd.ProcessState.ExitCode(),
 		Output:    stdout.String(),
@@ -151,7 +164,6 @@ func (e *ScriptExecutor) runScript(ctx context.Context, scriptPath string, args 
 		EndTime:   time.Now(),
 		Metrics:   make(map[string]interface{}),
 	}
-
 	result.MemoryUsage = 0
 	result.CPUTime = 0
 
@@ -342,11 +354,9 @@ func (e *ScriptExecutor) ExecuteScriptWithOutputCapture(ctx context.Context, scr
 }
 
 // StartScriptAsync launches script execution in the background and returns
-// immediately so callers can stop long-running scripts while they execute.
+// immediately after the process is registered and started so callers can
+// observe running status and prevent duplicate launches.
 func (e *ScriptExecutor) StartScriptAsync(ctx context.Context, scriptPath string, args []string) error {
-	if e.IsScriptRunning(scriptPath) {
-		return fmt.Errorf("script already running: %s", scriptPath)
-	}
 	if err := e.validateScript(scriptPath); err != nil {
 		return fmt.Errorf("script validation failed: %w", err)
 	}
@@ -355,8 +365,13 @@ func (e *ScriptExecutor) StartScriptAsync(ctx context.Context, scriptPath string
 		return fmt.Errorf("preparing environment: %w", err)
 	}
 
+	run, cmd, stdout, stderr, startTime, err := e.launchScript(ctx, scriptPath, args, env)
+	if err != nil {
+		return err
+	}
+
 	go func() {
-		result, runErr := e.runScript(ctx, scriptPath, args, env)
+		result, runErr := e.waitScriptRun(run, scriptPath, cmd, stdout, stderr, startTime)
 		if runErr != nil {
 			e.logger.Error("async script execution failed",
 				zap.String("scriptPath", scriptPath),
