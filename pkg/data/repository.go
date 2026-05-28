@@ -1270,6 +1270,10 @@ func (r *PostgresRepository) SaveTransfer(ctx context.Context, transfer *DataTra
 	if transfer.Destination == "" {
 		transfer.Destination = "unknown"
 	}
+	metadata, err := marshalTransferMetadata(transfer)
+	if err != nil {
+		return err
+	}
 
 	if err := r.ensureTransferPeer(ctx, transfer.Source); err != nil {
 		return err
@@ -1281,10 +1285,10 @@ func (r *PostgresRepository) SaveTransfer(ctx context.Context, transfer *DataTra
 	query := `
         INSERT INTO transfers (
             id, source_peer_id, target_peer_id, data_type, symbol, start_time,
-            end_time, status, progress, size_bytes, speed_bps, error_message
+            end_time, status, progress, size_bytes, speed_bps, error_message, metadata
         ) VALUES (
             $1, $2, $3, $4, $5, $6,
-            $7, $8, $9, $10, $11, $12
+            $7, $8, $9, $10, $11, $12, $13
         )
         ON CONFLICT (id) DO UPDATE SET
             status = EXCLUDED.status,
@@ -1293,10 +1297,11 @@ func (r *PostgresRepository) SaveTransfer(ctx context.Context, transfer *DataTra
             size_bytes = EXCLUDED.size_bytes,
             speed_bps = EXCLUDED.speed_bps,
             error_message = EXCLUDED.error_message,
+            metadata = EXCLUDED.metadata,
             updated_at = NOW()
     `
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err = r.pool.Exec(ctx, query,
 		transfer.ID,
 		transfer.Source,
 		transfer.Destination,
@@ -1309,6 +1314,7 @@ func (r *PostgresRepository) SaveTransfer(ctx context.Context, transfer *DataTra
 		transfer.Size,
 		transfer.Speed,
 		nullableString(transfer.Error),
+		metadata,
 	)
 	if err != nil {
 		return fmt.Errorf("saving transfer: %w", err)
@@ -1320,7 +1326,7 @@ func (r *PostgresRepository) SaveTransfer(ctx context.Context, transfer *DataTra
 func (r *PostgresRepository) ListTransfers(ctx context.Context) ([]DataTransfer, error) {
 	query := `
         SELECT id, source_peer_id, target_peer_id, data_type, symbol, start_time,
-               end_time, status, progress, size_bytes, speed_bps, error_message
+               end_time, status, progress, size_bytes, speed_bps, error_message, metadata
         FROM transfers
         ORDER BY start_time DESC
         LIMIT 200
@@ -1337,6 +1343,7 @@ func (r *PostgresRepository) ListTransfers(ctx context.Context) ([]DataTransfer,
 		var transfer DataTransfer
 		var endTime *time.Time
 		var errorMessage *string
+		var metadataJSON []byte
 		if err := rows.Scan(
 			&transfer.ID,
 			&transfer.Source,
@@ -1350,6 +1357,7 @@ func (r *PostgresRepository) ListTransfers(ctx context.Context) ([]DataTransfer,
 			&transfer.Size,
 			&transfer.Speed,
 			&errorMessage,
+			&metadataJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scanning transfer: %w", err)
 		}
@@ -1359,12 +1367,66 @@ func (r *PostgresRepository) ListTransfers(ctx context.Context) ([]DataTransfer,
 		if errorMessage != nil {
 			transfer.Error = *errorMessage
 		}
+		if err := unmarshalTransferMetadata(metadataJSON, &transfer); err != nil {
+			return nil, err
+		}
 		transfers = append(transfers, transfer)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating transfers: %w", err)
 	}
 	return transfers, nil
+}
+
+type transferMetadata struct {
+	RequestID       string `json:"request_id,omitempty"`
+	StartDate       string `json:"start_date,omitempty"`
+	EndDate         string `json:"end_date,omitempty"`
+	Granularity     string `json:"granularity,omitempty"`
+	ChunkSize       int    `json:"chunk_size,omitempty"`
+	TotalRows       int    `json:"total_rows,omitempty"`
+	TotalChunks     int    `json:"total_chunks,omitempty"`
+	CompletedChunks int    `json:"completed_chunks,omitempty"`
+	ResumeOffset    int    `json:"resume_offset,omitempty"`
+}
+
+func marshalTransferMetadata(transfer *DataTransfer) ([]byte, error) {
+	metadata := transferMetadata{
+		RequestID:       transfer.RequestID,
+		StartDate:       transfer.StartDate,
+		EndDate:         transfer.EndDate,
+		Granularity:     transfer.Granularity,
+		ChunkSize:       transfer.ChunkSize,
+		TotalRows:       transfer.TotalRows,
+		TotalChunks:     transfer.TotalChunks,
+		CompletedChunks: transfer.CompletedChunks,
+		ResumeOffset:    transfer.ResumeOffset,
+	}
+	content, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling transfer metadata: %w", err)
+	}
+	return content, nil
+}
+
+func unmarshalTransferMetadata(content []byte, transfer *DataTransfer) error {
+	if len(content) == 0 {
+		return nil
+	}
+	var metadata transferMetadata
+	if err := json.Unmarshal(content, &metadata); err != nil {
+		return fmt.Errorf("unmarshaling transfer metadata: %w", err)
+	}
+	transfer.RequestID = metadata.RequestID
+	transfer.StartDate = metadata.StartDate
+	transfer.EndDate = metadata.EndDate
+	transfer.Granularity = metadata.Granularity
+	transfer.ChunkSize = metadata.ChunkSize
+	transfer.TotalRows = metadata.TotalRows
+	transfer.TotalChunks = metadata.TotalChunks
+	transfer.CompletedChunks = metadata.CompletedChunks
+	transfer.ResumeOffset = metadata.ResumeOffset
+	return nil
 }
 
 func (r *PostgresRepository) upsertLocalDataSource(ctx context.Context, symbol, dataType string, observedAt time.Time) error {

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap"
 )
@@ -19,6 +20,15 @@ type splitWriter interface {
 
 type insiderWriter interface {
 	SaveInsiderData(context.Context, *data.InsiderTrade) error
+}
+
+type transferWriter interface {
+	SaveTransfer(context.Context, *data.DataTransfer) error
+}
+
+type transferHistoryStore interface {
+	SaveTransfer(context.Context, *data.DataTransfer) error
+	ListTransfers(context.Context) ([]data.DataTransfer, error)
 }
 
 // DataRequest represents a data request to a peer
@@ -148,47 +158,276 @@ func (nm *NetworkManager) RequestData(ctx context.Context, peerID string, reques
 	if request.Type == "" {
 		return fmt.Errorf("request type is required")
 	}
+	if request.RequestID == "" {
+		request.RequestID = uuid.New().String()
+	}
+	if request.TransferID == "" {
+		request.TransferID = uuid.New().String()
+	}
+	request.ChunkSize = normalizeChunkSize(request.ChunkSize)
 
 	id, err := libp2pPeer.Decode(peerID)
 	if err != nil {
+		nm.saveTransferFailure(ctx, peerID, request, err)
 		return fmt.Errorf("invalid peer ID: %w", err)
 	}
 
 	// Ensure the target peer is currently known and connected before dispatch.
 	if nm.host.host.Network().Connectedness(id) == 0 {
-		return fmt.Errorf("peer %s is not connected", peerID)
+		err := fmt.Errorf("peer %s is not connected", peerID)
+		nm.saveTransferFailure(ctx, peerID, request, err)
+		return err
 	}
 
+	if err := nm.saveTransferProgress(ctx, peerID, request, nil, "transferring", "", 0); err != nil {
+		return err
+	}
+	nm.host.metrics.RecordTransferStarted()
+
+	for {
+		resp, err := nm.requestDataChunk(ctx, id, request)
+		if err != nil {
+			nm.saveTransferFailure(ctx, peerID, request, err)
+			return err
+		}
+		if resp.Error != "" {
+			err := fmt.Errorf("remote data request failed: %s", resp.Error)
+			nm.saveTransferFailure(ctx, peerID, request, err)
+			return err
+		}
+		if err := validateChunkResponse(resp, request); err != nil {
+			nm.saveTransferFailure(ctx, peerID, request, err)
+			return err
+		}
+		if err := verifyResponseChecksum(resp); err != nil {
+			nm.saveTransferFailure(ctx, peerID, request, err)
+			return err
+		}
+		if err := nm.persistDataResponse(ctx, peerID, resp); err != nil {
+			nm.saveTransferFailure(ctx, peerID, request, err)
+			return err
+		}
+		payloadBytes := chunkPayloadSize(resp)
+		nm.host.metrics.RecordChunkReceived(resp, payloadBytes)
+		request.Offset = resp.NextOffset
+		if err := nm.saveTransferProgress(ctx, peerID, request, &resp, "transferring", "", payloadBytes); err != nil {
+			return err
+		}
+		if !resp.HasMore {
+			if err := nm.saveTransferProgress(ctx, peerID, request, &resp, "completed", "", 0); err != nil {
+				return err
+			}
+			nm.host.metrics.RecordTransferCompleted()
+			break
+		}
+		if responseRowCount(resp) == 0 {
+			err := fmt.Errorf("remote response returned no rows while indicating more chunks")
+			nm.saveTransferFailure(ctx, peerID, request, err)
+			return err
+		}
+	}
+
+	nm.logger.Info("Data request completed",
+		zap.String("peerID", peerID),
+		zap.String("type", request.Type),
+		zap.String("symbol", request.Symbol),
+		zap.String("requestID", request.RequestID))
+	return nil
+}
+
+func (nm *NetworkManager) requestDataChunk(ctx context.Context, id libp2pPeer.ID, request data.DataRequest) (dataResponse, error) {
+	if err := nm.host.signDataRequest(&request); err != nil {
+		return dataResponse{}, err
+	}
+	start := time.Now()
 	stream, err := nm.host.host.NewStream(ctx, id, ProtocolID)
 	if err != nil {
-		return fmt.Errorf("opening data request stream: %w", err)
+		return dataResponse{}, fmt.Errorf("opening data request stream: %w", err)
 	}
 	defer stream.Close()
 
 	writer := bufio.NewWriter(stream)
 	if err := json.NewEncoder(writer).Encode(request); err != nil {
-		return fmt.Errorf("encoding data request: %w", err)
+		return dataResponse{}, fmt.Errorf("encoding data request: %w", err)
 	}
 	if err := writer.Flush(); err != nil {
-		return fmt.Errorf("flushing data request: %w", err)
+		return dataResponse{}, fmt.Errorf("flushing data request: %w", err)
 	}
 
 	var resp dataResponse
 	if err := json.NewDecoder(bufio.NewReader(stream)).Decode(&resp); err != nil {
-		return fmt.Errorf("decoding data response: %w", err)
+		return dataResponse{}, fmt.Errorf("decoding data response: %w", err)
 	}
-	if resp.Error != "" {
-		return fmt.Errorf("remote data request failed: %s", resp.Error)
+	nm.host.metrics.UpdateNetworkLatency(time.Since(start))
+	if resp.RequestID != "" && resp.RequestID != request.RequestID {
+		return dataResponse{}, fmt.Errorf("response request id mismatch: got %s want %s", resp.RequestID, request.RequestID)
 	}
-	if err := nm.persistDataResponse(ctx, peerID, resp); err != nil {
+	if resp.TransferID != "" && resp.TransferID != request.TransferID {
+		return dataResponse{}, fmt.Errorf("response transfer id mismatch: got %s want %s", resp.TransferID, request.TransferID)
+	}
+	if err := nm.host.verifyDataResponse(id, request, &resp); err != nil {
+		return dataResponse{}, err
+	}
+	return resp, nil
+}
+
+func validateChunkResponse(resp dataResponse, request data.DataRequest) error {
+	if resp.Checksum == "" {
+		return fmt.Errorf("response checksum is required")
+	}
+	if resp.ChunkSize != normalizeChunkSize(request.ChunkSize) {
+		return fmt.Errorf("response chunk size mismatch: got %d want %d", resp.ChunkSize, normalizeChunkSize(request.ChunkSize))
+	}
+	if resp.Offset != request.Offset {
+		return fmt.Errorf("response offset mismatch: got %d want %d", resp.Offset, request.Offset)
+	}
+	if resp.NextOffset < resp.Offset {
+		return fmt.Errorf("response next offset %d is before offset %d", resp.NextOffset, resp.Offset)
+	}
+	rowCount := responseRowCount(resp)
+	if resp.NextOffset-resp.Offset != rowCount {
+		return fmt.Errorf("response row count mismatch: got %d row(s) for offset range %d", rowCount, resp.NextOffset-resp.Offset)
+	}
+	if resp.TotalRows < resp.NextOffset {
+		return fmt.Errorf("response total rows %d is before next offset %d", resp.TotalRows, resp.NextOffset)
+	}
+	if resp.TotalRows > 0 && resp.TotalChunks <= 0 {
+		return fmt.Errorf("response total chunks is required when total rows is non-zero")
+	}
+	if resp.HasMore && resp.NextOffset >= resp.TotalRows {
+		return fmt.Errorf("response indicates more chunks after final offset")
+	}
+	if !resp.HasMore && resp.NextOffset != resp.TotalRows {
+		return fmt.Errorf("response final offset %d does not match total rows %d", resp.NextOffset, resp.TotalRows)
+	}
+	return nil
+}
+
+func verifyResponseChecksum(resp dataResponse) error {
+	if resp.Checksum == "" {
+		return nil
+	}
+	checksum, err := responseChecksum(resp)
+	if err != nil {
 		return err
 	}
-
-	nm.logger.Info("Data request queued",
-		zap.String("peerID", peerID),
-		zap.String("type", request.Type),
-		zap.String("symbol", request.Symbol))
+	if checksum != resp.Checksum {
+		return fmt.Errorf("response checksum mismatch for chunk %d", resp.ChunkIndex)
+	}
 	return nil
+}
+
+func chunkPayloadSize(resp dataResponse) int64 {
+	content, err := json.Marshal(resp)
+	if err != nil {
+		return 0
+	}
+	return int64(len(content))
+}
+
+func (nm *NetworkManager) saveTransferProgress(ctx context.Context, peerID string, request data.DataRequest, resp *dataResponse, status, errorMessage string, bytesReceived int64) error {
+	repo, ok := nm.host.repo.(transferWriter)
+	if !ok {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	var existing *data.DataTransfer
+	if history, ok := nm.host.repo.(transferHistoryStore); ok {
+		existing = findTransferByID(ctx, history, request.TransferID)
+	}
+	transfer := &data.DataTransfer{
+		ID:          request.TransferID,
+		RequestID:   request.RequestID,
+		Type:        request.Type,
+		Symbol:      request.Symbol,
+		Source:      peerID,
+		Destination: "local",
+		StartDate:   request.StartDate,
+		EndDate:     request.EndDate,
+		Granularity: request.Granularity,
+		Status:      status,
+		StartTime:   now,
+		ChunkSize:   request.ChunkSize,
+		Error:       errorMessage,
+	}
+	if existing != nil {
+		transfer.StartTime = existing.StartTime
+		transfer.TotalRows = existing.TotalRows
+		transfer.TotalChunks = existing.TotalChunks
+		transfer.CompletedChunks = existing.CompletedChunks
+		transfer.ResumeOffset = existing.ResumeOffset
+		transfer.Size = existing.Size
+		transfer.Speed = existing.Speed
+		transfer.Progress = existing.Progress
+	}
+	if resp != nil {
+		transfer.TotalRows = resp.TotalRows
+		transfer.TotalChunks = resp.TotalChunks
+		transfer.CompletedChunks = resp.TotalChunks
+		if resp.TotalRows > 0 {
+			transfer.CompletedChunks = resp.ChunkIndex + 1
+		}
+		transfer.ResumeOffset = resp.NextOffset
+		rowSize := int64(512)
+		rowCount := responseRowCount(*resp)
+		if bytesReceived > 0 && rowCount > 0 {
+			rowSize = bytesReceived / int64(rowCount)
+			if rowSize <= 0 {
+				rowSize = 512
+			}
+		}
+		transfer.Size = int64(resp.NextOffset) * rowSize
+		if transfer.Size < bytesReceived {
+			transfer.Size = bytesReceived
+		}
+		transfer.Speed = float64(bytesReceived)
+		elapsed := now.Sub(transfer.StartTime).Seconds()
+		if elapsed > 0 && transfer.Size > 0 {
+			transfer.Speed = float64(transfer.Size) / elapsed
+		}
+		if resp.TotalRows > 0 {
+			transfer.Progress = float64(resp.NextOffset) / float64(resp.TotalRows) * 100
+		} else if status == "completed" {
+			transfer.Progress = 100
+		}
+	} else if request.Offset > 0 {
+		transfer.ResumeOffset = request.Offset
+		transfer.CompletedChunks = (request.Offset + request.ChunkSize - 1) / request.ChunkSize
+	}
+	if status == "completed" {
+		transfer.Progress = 100
+		transfer.EndTime = now
+	}
+	if status == "failed" {
+		transfer.EndTime = now
+	}
+	return repo.SaveTransfer(ctx, transfer)
+}
+
+func findTransferByID(ctx context.Context, repo transferHistoryStore, id string) *data.DataTransfer {
+	if id == "" {
+		return nil
+	}
+	transfers, err := repo.ListTransfers(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, transfer := range transfers {
+		if transfer.ID == id {
+			copyTransfer := transfer
+			return &copyTransfer
+		}
+	}
+	return nil
+}
+
+func (nm *NetworkManager) saveTransferFailure(ctx context.Context, peerID string, request data.DataRequest, err error) {
+	if request.TransferID == "" {
+		return
+	}
+	nm.host.metrics.RecordTransferFailed(err)
+	_ = nm.saveTransferProgress(ctx, peerID, request, nil, "failed", err.Error(), 0)
 }
 
 func (nm *NetworkManager) persistDataResponse(ctx context.Context, peerID string, resp dataResponse) error {

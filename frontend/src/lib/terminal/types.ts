@@ -27,6 +27,7 @@ export interface TerminalPeer {
 
 export interface TerminalTransfer {
   id: string
+  requestId?: string
   type: string
   symbol: string
   source: string
@@ -37,6 +38,62 @@ export interface TerminalTransfer {
   endTime?: string
   size: number
   speed: number
+  error?: string
+  chunkSize?: number
+  totalRows?: number
+  totalChunks?: number
+  completedChunks?: number
+  resumeOffset?: number
+}
+
+export interface TerminalP2PMetrics {
+  connectedPeers: number
+  totalPeers: number
+  messagesProcessed: number
+  networkLatencyMs: number
+  requestsReceived: number
+  requestsRejected: number
+  authFailures: number
+  transfersStarted: number
+  transfersComplete: number
+  transfersFailed: number
+  chunksSent: number
+  chunksReceived: number
+  rowsSent: number
+  rowsReceived: number
+  bytesSent: number
+  bytesReceived: number
+  lastError?: string
+  lastRequestAt?: string
+  lastTransferAt?: string
+  lastUpdated?: string
+}
+
+export interface TerminalSecurityHealth {
+  requestSigningRequired: boolean
+  responseSigningRequired: boolean
+  pubSubStrictSigning: boolean
+  keyFileConfigured: boolean
+  keyFileExists: boolean
+  authFailures: number
+  lastSecurityError?: string
+}
+
+export interface TerminalTransferSummary {
+  pending: number
+  transferring: number
+  completed: number
+  failed: number
+}
+
+export interface TerminalHealthDiagnostics {
+  generatedAt: string
+  uptimeSeconds: number
+  databaseLatencyMs: number
+  p2pMetrics: TerminalP2PMetrics
+  transferSummary: TerminalTransferSummary
+  security: TerminalSecurityHealth
+  operationalWarnings: string[]
 }
 
 export interface TerminalScript {
@@ -128,6 +185,7 @@ export interface SearchQuery extends DataRequest {
 
 export interface TerminalState {
   serverStatus: ServerStatus | null
+  healthDiagnostics: TerminalHealthDiagnostics | null
   isConnected: boolean
   peers: TerminalPeer[]
   dataSources: TerminalDataSource[]

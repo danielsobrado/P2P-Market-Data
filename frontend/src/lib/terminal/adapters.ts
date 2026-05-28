@@ -30,14 +30,19 @@ function bool(v: unknown): boolean {
   return v === true
 }
 
-export function toWailsDataRequest(request: DataRequest): Record<string, string> {
-  return {
+export function toWailsDataRequest(request: DataRequest): Record<string, string | number | undefined> {
+  const payload: Record<string, string | number | undefined> = {
+    request_id: request.requestId,
+    transfer_id: request.transferId,
     type: request.type,
     symbol: request.symbol,
     start_date: request.startDate,
     end_date: request.endDate,
     granularity: request.granularity,
+    offset: request.offset,
+    chunk_size: request.chunkSize,
   }
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined))
 }
 
 export function adaptDataSource(raw: RawRecord): TerminalDataSource {
@@ -103,6 +108,7 @@ export function adaptPeers(raw: unknown): TerminalPeer[] {
 export function adaptTransfer(raw: RawRecord): TerminalTransfer {
   return {
     id: str(raw.id),
+    requestId: str(raw.requestId ?? raw.request_id),
     type: str(raw.type),
     symbol: str(raw.symbol),
     source: str(raw.source),
@@ -113,6 +119,12 @@ export function adaptTransfer(raw: RawRecord): TerminalTransfer {
     endTime: raw.endTime || raw.end_time ? str(raw.endTime ?? raw.end_time) : undefined,
     size: num(raw.size),
     speed: num(raw.speed),
+    error: raw.error ? str(raw.error) : undefined,
+    chunkSize: num(raw.chunkSize ?? raw.chunk_size),
+    totalRows: num(raw.totalRows ?? raw.total_rows),
+    totalChunks: num(raw.totalChunks ?? raw.total_chunks),
+    completedChunks: num(raw.completedChunks ?? raw.completed_chunks),
+    resumeOffset: num(raw.resumeOffset ?? raw.resume_offset),
   }
 }
 

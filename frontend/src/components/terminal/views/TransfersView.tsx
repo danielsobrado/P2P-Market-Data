@@ -14,7 +14,7 @@ export function TransfersView({ data }: { data: TerminalData }) {
       <Panel
         title="Transfer Queue"
         tag="TX"
-        sub={`${transfers.length} total · ${active.length} active`}
+        sub={`${transfers.length} total / ${active.length} active`}
         flush
         actions={
           <button className="btn sm ghost" onClick={() => refreshCore()}>
@@ -30,8 +30,9 @@ export function TransfersView({ data }: { data: TerminalData }) {
                 <th>Tx ID</th>
                 <th>Symbol</th>
                 <th>Type</th>
-                <th>Source → Dest</th>
+                <th>Source / Dest</th>
                 <th style={{ width: 160 }}>Progress</th>
+                <th className="num">Chunks</th>
                 <th className="num">Speed</th>
                 <th className="num">Size</th>
                 <th>Started</th>
@@ -45,7 +46,7 @@ export function TransfersView({ data }: { data: TerminalData }) {
                   <td className="sym">{t.symbol}</td>
                   <td className="dim">{t.type}</td>
                   <td className="mono" style={{ fontSize: 11 }}>
-                    {t.source} → {t.destination}
+                    {t.source} / {t.destination}
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -58,10 +59,18 @@ export function TransfersView({ data }: { data: TerminalData }) {
                         {t.progress}%
                       </span>
                     </div>
+                    {t.error ? (
+                      <div className="dim" style={{ fontSize: 10.5, marginTop: 3, color: 'var(--danger)' }}>
+                        {t.error}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="num dim">
+                    {t.totalChunks ? `${t.completedChunks ?? 0}/${t.totalChunks}` : '-'}
                   </td>
                   <td className="num dim">{formatSpeed(t.speed)}</td>
                   <td className="num dim">{formatBytes(t.size)}</td>
-                  <td className="dim">{t.startTime?.slice(0, 19) || '—'}</td>
+                  <td className="dim">{t.startTime?.slice(0, 19) || '-'}</td>
                   <td>
                     <StatusBadge kind={transferStatusKind(t.status)}>{t.status}</StatusBadge>
                   </td>
@@ -73,7 +82,7 @@ export function TransfersView({ data }: { data: TerminalData }) {
           <EmptyState
             icon={<ArrowDownToLine size={28} />}
             title="No active transfers"
-            hint="Transfer tracking is not yet persisted — queue will populate when backend implements transfer state"
+            hint="Transfer history will appear after a local or peer download starts."
           />
         )}
       </Panel>

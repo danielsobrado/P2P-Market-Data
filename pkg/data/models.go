@@ -67,27 +67,45 @@ type DataSource struct {
 
 // DataRequest represents a request for data
 type DataRequest struct {
-	Type        string `json:"type"`
-	Symbol      string `json:"symbol"`
-	StartDate   string `json:"start_date"`
-	EndDate     string `json:"end_date"`
-	Granularity string `json:"granularity"`
+	RequestID       string `json:"request_id,omitempty"`
+	TransferID      string `json:"transfer_id,omitempty"`
+	RequesterPeerID string `json:"requester_peer_id,omitempty"`
+	RequesterPubKey []byte `json:"requester_public_key,omitempty"`
+	RequestedAt     int64  `json:"requested_at,omitempty"`
+	Nonce           string `json:"nonce,omitempty"`
+	Signature       []byte `json:"signature,omitempty"`
+	Type            string `json:"type"`
+	Symbol          string `json:"symbol"`
+	StartDate       string `json:"start_date"`
+	EndDate         string `json:"end_date"`
+	Granularity     string `json:"granularity"`
+	Offset          int    `json:"offset,omitempty"`
+	ChunkSize       int    `json:"chunk_size,omitempty"`
 }
 
 // DataTransfer represents a data transfer tracked for the UI and API.
 type DataTransfer struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`
-	Symbol      string    `json:"symbol"`
-	Source      string    `json:"source"`
-	Destination string    `json:"destination"`
-	Progress    float64   `json:"progress"`
-	Status      string    `json:"status"`
-	StartTime   time.Time `json:"start_time"`
-	EndTime     time.Time `json:"end_time,omitempty"`
-	Size        int64     `json:"size"`
-	Speed       float64   `json:"speed"`
-	Error       string    `json:"error,omitempty"`
+	ID              string    `json:"id"`
+	RequestID       string    `json:"request_id,omitempty"`
+	Type            string    `json:"type"`
+	Symbol          string    `json:"symbol"`
+	Source          string    `json:"source"`
+	Destination     string    `json:"destination"`
+	StartDate       string    `json:"start_date,omitempty"`
+	EndDate         string    `json:"end_date,omitempty"`
+	Granularity     string    `json:"granularity,omitempty"`
+	Progress        float64   `json:"progress"`
+	Status          string    `json:"status"`
+	StartTime       time.Time `json:"start_time"`
+	EndTime         time.Time `json:"end_time,omitempty"`
+	Size            int64     `json:"size"`
+	Speed           float64   `json:"speed"`
+	Error           string    `json:"error,omitempty"`
+	ChunkSize       int       `json:"chunk_size,omitempty"`
+	TotalRows       int       `json:"total_rows,omitempty"`
+	TotalChunks     int       `json:"total_chunks,omitempty"`
+	CompletedChunks int       `json:"completed_chunks,omitempty"`
+	ResumeOffset    int       `json:"resume_offset,omitempty"`
 }
 
 // NewMarketData creates a new MarketData instance with validation

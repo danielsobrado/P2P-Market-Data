@@ -57,6 +57,7 @@ type requestDataRequest struct {
 	StartDate   string `json:"start_date"`
 	EndDate     string `json:"end_date"`
 	Granularity string `json:"granularity"`
+	ChunkSize   int    `json:"chunk_size"`
 }
 
 func main() {
@@ -262,6 +263,7 @@ func (s *server) requestData(w http.ResponseWriter, r *http.Request) {
 		StartDate:   req.StartDate,
 		EndDate:     req.EndDate,
 		Granularity: req.Granularity,
+		ChunkSize:   req.ChunkSize,
 	}
 	if err := s.host.RequestData(r.Context(), req.PeerID, request); err != nil {
 		writeError(w, http.StatusBadGateway, err)

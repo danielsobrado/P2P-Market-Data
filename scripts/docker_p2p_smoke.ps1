@@ -58,19 +58,21 @@ Invoke-RestMethod `
     -ContentType "application/json" `
     -Body (@{ addr = $node1Addr } | ConvertTo-Json) | Out-Null
 
-$payload = @{
-    symbol = "BTCUSD"
-    price = 50000
-    volume = 12
-    source = "docker-smoke"
-    data_type = "EOD"
-} | ConvertTo-Json
+1..3 | ForEach-Object {
+    $payload = @{
+        symbol = "BTCUSD"
+        price = 50000 + $_
+        volume = 12 + $_
+        source = "docker-smoke"
+        data_type = "EOD"
+    } | ConvertTo-Json
 
-Invoke-RestMethod `
-    -Uri "http://localhost:18080/market-data" `
-    -Method Post `
-    -ContentType "application/json" `
-    -Body $payload | Out-Null
+    Invoke-RestMethod `
+        -Uri "http://localhost:18080/market-data" `
+        -Method Post `
+        -ContentType "application/json" `
+        -Body $payload | Out-Null
+}
 
 $requestPayload = @{
     peer_id = $node1.peer_id
@@ -79,6 +81,7 @@ $requestPayload = @{
     start_date = (Get-Date).AddDays(-1).ToUniversalTime().ToString("yyyy-MM-dd")
     end_date = (Get-Date).AddDays(1).ToUniversalTime().ToString("yyyy-MM-dd")
     granularity = "DAILY"
+    chunk_size = 1
 } | ConvertTo-Json
 
 Invoke-RestMethod `
@@ -90,7 +93,7 @@ Invoke-RestMethod `
 $deadline = (Get-Date).AddSeconds(30)
 do {
     $records = Invoke-RestMethod -Uri "http://localhost:18081/market-data?symbol=BTCUSD" -TimeoutSec 3
-    if ($records.Count -gt 0) {
+    if ($records.Count -ge 3) {
         Write-Host "P2P Docker smoke test passed. Node 2 received $($records.Count) BTCUSD record(s)."
         $records | ConvertTo-Json -Depth 8
         if ($env:KEEP_P2P_SMOKE -ne "1") {

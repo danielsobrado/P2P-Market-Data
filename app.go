@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	postgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
@@ -43,6 +45,7 @@ type App struct {
 
 	scriptInstall     map[string]bool
 	scriptInstallPath string
+	startedAt         time.Time
 }
 
 // ServerStatus represents the status of the application's core services
@@ -57,15 +60,61 @@ type ServerStatus struct {
 // AppHealthDiagnostics is a frontend-facing snapshot for beta support and smoke checks.
 type AppHealthDiagnostics struct {
 	GeneratedAt          string          `json:"generatedAt"`
+	UptimeSeconds        int64           `json:"uptimeSeconds"`
 	Status               ServerStatus    `json:"status"`
 	DatabaseURL          string          `json:"databaseUrl"`
+	DatabaseLatencyMs    int64           `json:"databaseLatencyMs"`
 	RequiredTables       map[string]bool `json:"requiredTables"`
 	P2PHostID            string          `json:"p2pHostId"`
 	P2PListenAddresses   []string        `json:"p2pListenAddresses"`
 	ConnectedPeers       []string        `json:"connectedPeers"`
+	P2PMetrics           P2PMetrics      `json:"p2pMetrics"`
+	TransferSummary      TransferSummary `json:"transferSummary"`
+	Security             SecurityHealth  `json:"security"`
 	ScriptManagerRunning bool            `json:"scriptManagerRunning"`
 	PythonRuntime        string          `json:"pythonRuntime"`
 	LatestTransferErrors []string        `json:"latestTransferErrors"`
+	OperationalWarnings  []string        `json:"operationalWarnings"`
+}
+
+type P2PMetrics struct {
+	ConnectedPeers    int    `json:"connectedPeers"`
+	TotalPeers        int    `json:"totalPeers"`
+	MessagesProcessed int64  `json:"messagesProcessed"`
+	NetworkLatencyMs  int64  `json:"networkLatencyMs"`
+	RequestsReceived  int64  `json:"requestsReceived"`
+	RequestsRejected  int64  `json:"requestsRejected"`
+	AuthFailures      int64  `json:"authFailures"`
+	TransfersStarted  int64  `json:"transfersStarted"`
+	TransfersComplete int64  `json:"transfersComplete"`
+	TransfersFailed   int64  `json:"transfersFailed"`
+	ChunksSent        int64  `json:"chunksSent"`
+	ChunksReceived    int64  `json:"chunksReceived"`
+	RowsSent          int64  `json:"rowsSent"`
+	RowsReceived      int64  `json:"rowsReceived"`
+	BytesSent         int64  `json:"bytesSent"`
+	BytesReceived     int64  `json:"bytesReceived"`
+	LastError         string `json:"lastError,omitempty"`
+	LastRequestAt     string `json:"lastRequestAt,omitempty"`
+	LastTransferAt    string `json:"lastTransferAt,omitempty"`
+	LastUpdated       string `json:"lastUpdated,omitempty"`
+}
+
+type TransferSummary struct {
+	Pending      int `json:"pending"`
+	Transferring int `json:"transferring"`
+	Completed    int `json:"completed"`
+	Failed       int `json:"failed"`
+}
+
+type SecurityHealth struct {
+	RequestSigningRequired  bool   `json:"requestSigningRequired"`
+	ResponseSigningRequired bool   `json:"responseSigningRequired"`
+	PubSubStrictSigning     bool   `json:"pubSubStrictSigning"`
+	KeyFileConfigured       bool   `json:"keyFileConfigured"`
+	KeyFileExists           bool   `json:"keyFileExists"`
+	AuthFailures            int64  `json:"authFailures"`
+	LastSecurityError       string `json:"lastSecurityError,omitempty"`
 }
 
 // ScriptInfo is a frontend-facing script list payload.
@@ -84,17 +133,24 @@ type ScriptInfo struct {
 
 // ActiveTransfer is a frontend-facing transfer status payload.
 type ActiveTransfer struct {
-	ID          string  `json:"id"`
-	Type        string  `json:"type"`
-	Symbol      string  `json:"symbol"`
-	Source      string  `json:"source"`
-	Destination string  `json:"destination"`
-	Progress    float64 `json:"progress"`
-	Status      string  `json:"status"`
-	StartTime   string  `json:"startTime"`
-	EndTime     string  `json:"endTime,omitempty"`
-	Size        int64   `json:"size"`
-	Speed       float64 `json:"speed"`
+	ID              string  `json:"id"`
+	RequestID       string  `json:"requestId,omitempty"`
+	Type            string  `json:"type"`
+	Symbol          string  `json:"symbol"`
+	Source          string  `json:"source"`
+	Destination     string  `json:"destination"`
+	Progress        float64 `json:"progress"`
+	Status          string  `json:"status"`
+	StartTime       string  `json:"startTime"`
+	EndTime         string  `json:"endTime,omitempty"`
+	Size            int64   `json:"size"`
+	Speed           float64 `json:"speed"`
+	Error           string  `json:"error,omitempty"`
+	ChunkSize       int     `json:"chunkSize,omitempty"`
+	TotalRows       int     `json:"totalRows,omitempty"`
+	TotalChunks     int     `json:"totalChunks,omitempty"`
+	CompletedChunks int     `json:"completedChunks,omitempty"`
+	ResumeOffset    int     `json:"resumeOffset,omitempty"`
 }
 
 type splitRepository interface {
@@ -242,6 +298,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	a.running = true
+	a.startedAt = time.Now().UTC()
 	a.logger.Info("Application started successfully")
 }
 
@@ -547,22 +604,69 @@ func (a *App) GetHealthDiagnostics() AppHealthDiagnostics {
 	diagnostics := AppHealthDiagnostics{
 		GeneratedAt:          time.Now().UTC().Format(time.RFC3339),
 		Status:               status,
-		DatabaseURL:          a.config.Database.URL,
+		DatabaseURL:          redactConnectionString(a.config.Database.URL),
 		RequiredTables:       make(map[string]bool),
 		ScriptManagerRunning: status.ScriptMgrRunning,
 		PythonRuntime:        a.config.Scripts.PythonPath,
+		Security: SecurityHealth{
+			RequestSigningRequired:  true,
+			ResponseSigningRequired: true,
+			PubSubStrictSigning:     true,
+			KeyFileConfigured:       a.config.Security.KeyFile != "",
+		},
+	}
+	if !a.startedAt.IsZero() {
+		diagnostics.UptimeSeconds = int64(time.Since(a.startedAt).Seconds())
+	}
+	if a.config.Security.KeyFile != "" {
+		if _, err := os.Stat(a.config.Security.KeyFile); err == nil {
+			diagnostics.Security.KeyFileExists = true
+		}
 	}
 
 	if a.peerHost != nil {
 		diagnostics.P2PHostID = a.peerHost.ID().String()
 		diagnostics.P2PListenAddresses = a.peerHost.FullAddrs()
 		diagnostics.ConnectedPeers = a.peerHost.ConnectedPeers()
+		metrics := a.peerHost.MetricsSnapshot()
+		diagnostics.P2PMetrics = P2PMetrics{
+			ConnectedPeers:    metrics.ConnectedPeers,
+			TotalPeers:        metrics.TotalPeers,
+			MessagesProcessed: metrics.MessagesProcessed,
+			NetworkLatencyMs:  metrics.NetworkLatencyMs,
+			RequestsReceived:  metrics.RequestsReceived,
+			RequestsRejected:  metrics.RequestsRejected,
+			AuthFailures:      metrics.AuthFailures,
+			TransfersStarted:  metrics.TransfersStarted,
+			TransfersComplete: metrics.TransfersComplete,
+			TransfersFailed:   metrics.TransfersFailed,
+			ChunksSent:        metrics.ChunksSent,
+			ChunksReceived:    metrics.ChunksReceived,
+			RowsSent:          metrics.RowsSent,
+			RowsReceived:      metrics.RowsReceived,
+			BytesSent:         metrics.BytesSent,
+			BytesReceived:     metrics.BytesReceived,
+			LastError:         metrics.LastError,
+			LastRequestAt:     metrics.LastRequestAt,
+			LastTransferAt:    metrics.LastTransferAt,
+			LastUpdated:       metrics.LastUpdated,
+		}
+		diagnostics.Security.AuthFailures = metrics.AuthFailures
+		if metrics.AuthFailures > 0 {
+			diagnostics.Security.LastSecurityError = metrics.LastError
+		}
 	}
 
 	requiredTables := []string{"market_data", "data_sources", "splits", "transfers", "scripts", "peers"}
 	if a.conn != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+		start := time.Now()
+		if err := a.conn.Ping(ctx); err == nil {
+			diagnostics.DatabaseLatencyMs = time.Since(start).Milliseconds()
+		} else {
+			diagnostics.OperationalWarnings = append(diagnostics.OperationalWarnings, fmt.Sprintf("database ping failed: %v", err))
+		}
 		for _, table := range requiredTables {
 			var exists bool
 			err := a.conn.QueryRow(ctx, `
@@ -572,6 +676,9 @@ func (a *App) GetHealthDiagnostics() AppHealthDiagnostics {
                     WHERE table_schema = 'public' AND table_name = $1
                 )`, table).Scan(&exists)
 			diagnostics.RequiredTables[table] = err == nil && exists
+			if err != nil || !exists {
+				diagnostics.OperationalWarnings = append(diagnostics.OperationalWarnings, fmt.Sprintf("required table missing: %s", table))
+			}
 		}
 	}
 
@@ -579,6 +686,16 @@ func (a *App) GetHealthDiagnostics() AppHealthDiagnostics {
 		transfers, err := repo.ListTransfers(a.ctx)
 		if err == nil {
 			for _, transfer := range transfers {
+				switch transfer.Status {
+				case "pending":
+					diagnostics.TransferSummary.Pending++
+				case "transferring":
+					diagnostics.TransferSummary.Transferring++
+				case "completed":
+					diagnostics.TransferSummary.Completed++
+				case "failed":
+					diagnostics.TransferSummary.Failed++
+				}
 				if transfer.Status == "failed" && transfer.Error != "" {
 					diagnostics.LatestTransferErrors = append(diagnostics.LatestTransferErrors,
 						fmt.Sprintf("%s %s %s: %s", transfer.Type, transfer.Symbol, transfer.StartTime.Format(time.RFC3339), transfer.Error))
@@ -587,10 +704,36 @@ func (a *App) GetHealthDiagnostics() AppHealthDiagnostics {
 					}
 				}
 			}
+		} else {
+			diagnostics.OperationalWarnings = append(diagnostics.OperationalWarnings, fmt.Sprintf("transfer history unavailable: %v", err))
 		}
 	}
 
+	if !status.DatabaseConnected {
+		diagnostics.OperationalWarnings = append(diagnostics.OperationalWarnings, "database is not connected")
+	}
+	if !status.P2PHostRunning {
+		diagnostics.OperationalWarnings = append(diagnostics.OperationalWarnings, "p2p host is not running")
+	}
+	if !diagnostics.Security.KeyFileConfigured || !diagnostics.Security.KeyFileExists {
+		diagnostics.OperationalWarnings = append(diagnostics.OperationalWarnings, "security key file is not ready")
+	}
+
 	return diagnostics
+}
+
+func redactConnectionString(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User == nil {
+		return raw
+	}
+	username := parsed.User.Username()
+	if username == "" {
+		parsed.User = url.UserPassword("redacted", "redacted")
+	} else {
+		parsed.User = url.UserPassword(username, "redacted")
+	}
+	return parsed.String()
 }
 
 func (a *App) SearchData(request data.DataRequest) ([]data.DataSource, error) {
@@ -605,16 +748,47 @@ func (a *App) RequestData(peerID string, request data.DataRequest) error {
 	if !ok {
 		return errors.New("transfer repository not available")
 	}
-
-	transfer := &data.DataTransfer{
-		Type:        request.Type,
-		Symbol:      request.Symbol,
-		Source:      peerID,
-		Destination: "local",
-		Progress:    0,
-		Status:      "pending",
-		StartTime:   time.Now().UTC(),
+	if request.RequestID == "" {
+		request.RequestID = uuid.New().String()
 	}
+	if request.ChunkSize <= 0 {
+		request.ChunkSize = 100
+	}
+
+	transfer := a.findResumableTransfer(transfers, peerID, request)
+	if transfer == nil {
+		transfer = &data.DataTransfer{
+			ID:          request.TransferID,
+			RequestID:   request.RequestID,
+			Type:        request.Type,
+			Symbol:      request.Symbol,
+			Source:      peerID,
+			Destination: "local",
+			StartDate:   request.StartDate,
+			EndDate:     request.EndDate,
+			Granularity: request.Granularity,
+			Progress:    0,
+			Status:      "pending",
+			StartTime:   time.Now().UTC(),
+			ChunkSize:   request.ChunkSize,
+		}
+	} else {
+		request.TransferID = transfer.ID
+		request.RequestID = transfer.RequestID
+		request.Offset = transfer.ResumeOffset
+		if transfer.ChunkSize > 0 {
+			request.ChunkSize = transfer.ChunkSize
+		}
+		transfer.Status = "pending"
+		transfer.Error = ""
+	}
+	if transfer.ID == "" {
+		transfer.ID = uuid.New().String()
+	}
+	if transfer.RequestID == "" {
+		transfer.RequestID = request.RequestID
+	}
+	request.TransferID = transfer.ID
 	if err := transfers.SaveTransfer(a.ctx, transfer); err != nil {
 		return err
 	}
@@ -628,12 +802,9 @@ func (a *App) RequestData(peerID string, request data.DataRequest) error {
 			return errors.New(transfer.Error)
 		}
 		if err := a.peerHost.RequestData(a.ctx, peerID, request); err != nil {
-			transfer.Status = "failed"
-			transfer.Error = err.Error()
-			transfer.EndTime = time.Now().UTC()
-			_ = transfers.SaveTransfer(a.ctx, transfer)
 			return err
 		}
+		return nil
 	}
 
 	transfer.Status = "completed"
@@ -645,6 +816,36 @@ func (a *App) RequestData(peerID string, request data.DataRequest) error {
 		transfer.Speed = float64(transfer.Size) / elapsed
 	}
 	return transfers.SaveTransfer(a.ctx, transfer)
+}
+
+func (a *App) findResumableTransfer(repo transferRepository, peerID string, request data.DataRequest) *data.DataTransfer {
+	if request.TransferID != "" {
+		return nil
+	}
+	transfers, err := repo.ListTransfers(a.ctx)
+	if err != nil {
+		a.logger.Warn("failed to inspect transfers for resume", zap.Error(err))
+		return nil
+	}
+	for _, transfer := range transfers {
+		if transfer.Status != "failed" && transfer.Status != "transferring" && transfer.Status != "pending" {
+			continue
+		}
+		if transfer.Source != peerID ||
+			transfer.Type != request.Type ||
+			transfer.Symbol != request.Symbol ||
+			transfer.StartDate != request.StartDate ||
+			transfer.EndDate != request.EndDate ||
+			transfer.Granularity != request.Granularity {
+			continue
+		}
+		if transfer.ResumeOffset <= 0 {
+			continue
+		}
+		copyTransfer := transfer
+		return &copyTransfer
+	}
+	return nil
 }
 
 func (a *App) GetInsiderData(symbol, startDate, endDate string) ([]data.InsiderTrade, error) {
@@ -677,16 +878,23 @@ func (a *App) GetActiveTransfers() ([]ActiveTransfer, error) {
 	result := make([]ActiveTransfer, 0, len(transfers))
 	for _, transfer := range transfers {
 		item := ActiveTransfer{
-			ID:          transfer.ID,
-			Type:        transfer.Type,
-			Symbol:      transfer.Symbol,
-			Source:      transfer.Source,
-			Destination: transfer.Destination,
-			Progress:    transfer.Progress,
-			Status:      transfer.Status,
-			StartTime:   transfer.StartTime.Format(time.RFC3339),
-			Size:        transfer.Size,
-			Speed:       transfer.Speed,
+			ID:              transfer.ID,
+			RequestID:       transfer.RequestID,
+			Type:            transfer.Type,
+			Symbol:          transfer.Symbol,
+			Source:          transfer.Source,
+			Destination:     transfer.Destination,
+			Progress:        transfer.Progress,
+			Status:          transfer.Status,
+			StartTime:       transfer.StartTime.Format(time.RFC3339),
+			Size:            transfer.Size,
+			Speed:           transfer.Speed,
+			Error:           transfer.Error,
+			ChunkSize:       transfer.ChunkSize,
+			TotalRows:       transfer.TotalRows,
+			TotalChunks:     transfer.TotalChunks,
+			CompletedChunks: transfer.CompletedChunks,
+			ResumeOffset:    transfer.ResumeOffset,
 		}
 		if !transfer.EndTime.IsZero() {
 			item.EndTime = transfer.EndTime.Format(time.RFC3339)

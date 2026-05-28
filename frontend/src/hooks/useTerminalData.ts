@@ -23,6 +23,7 @@ import type {
   TerminalDataSource,
   TerminalDividendRow,
   TerminalEODRow,
+  TerminalHealthDiagnostics,
   TerminalInsiderRow,
   TerminalPeer,
   TerminalScript,
@@ -40,6 +41,7 @@ function nowTs(): string {
 export function useTerminalData() {
   const defaults = useMemo(() => defaultDateRange(365), [])
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
+  const [healthDiagnostics, setHealthDiagnostics] = useState<TerminalHealthDiagnostics | null>(null)
   const [peers, setPeers] = useState<TerminalPeer[]>([])
   const [dataSources, setDataSources] = useState<TerminalDataSource[]>([])
   const [transfers, setTransfers] = useState<TerminalTransfer[]>([])
@@ -80,14 +82,16 @@ export function useTerminalData() {
 
   const refreshCore = useCallback(async () => {
     try {
-      const [status, peerList, sources, activeTransfers, scriptList] = await Promise.all([
+      const [status, diagnostics, peerList, sources, activeTransfers, scriptList] = await Promise.all([
         app().GetServerStatus(),
+        app().GetHealthDiagnostics(),
         app().GetPeers(),
         app().GetDataSources(),
         app().GetActiveTransfers(),
         app().GetScripts(),
       ])
       setServerStatus(status)
+      setHealthDiagnostics(diagnostics as TerminalHealthDiagnostics)
       setPeers(adaptPeers(peerList))
       setDataSources(adaptDataSources(sources))
       setTransfers(adaptTransfers(activeTransfers))
@@ -318,6 +322,7 @@ export function useTerminalData() {
 
   return {
     serverStatus,
+    healthDiagnostics,
     isConnected,
     peers,
     dataSources,

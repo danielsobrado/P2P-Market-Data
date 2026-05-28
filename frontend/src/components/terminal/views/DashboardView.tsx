@@ -10,10 +10,10 @@ import {
   StatusBadge,
   TerminalProgress,
 } from '../TerminalComponents'
-import type { TerminalEODRow, TerminalPeer, TerminalTransfer } from '@/lib/terminal/types'
+import type { TerminalEODRow, TerminalHealthDiagnostics, TerminalPeer, TerminalTransfer } from '@/lib/terminal/types'
 
 export function DashboardView({ data }: { data: TerminalData }) {
-  const { kpis, eodData, transfers, peers, isConnected, serverStatus } = data
+  const { kpis, eodData, transfers, peers, isConnected, serverStatus, healthDiagnostics } = data
   const activeTransfers = transfers.filter(
     (t) => t.status === 'transferring' || t.status === 'pending',
   )
@@ -85,7 +85,12 @@ export function DashboardView({ data }: { data: TerminalData }) {
 
       <div className="span-4" style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 360 }}>
         <Panel title="Network Health" tag="STATUS" style={{ flex: 1 }}>
-          <NetworkHealth peers={peers} isConnected={isConnected} serverStatus={serverStatus} />
+          <NetworkHealth
+            peers={peers}
+            isConnected={isConnected}
+            serverStatus={serverStatus}
+            healthDiagnostics={healthDiagnostics}
+          />
         </Panel>
       </div>
 
@@ -122,18 +127,30 @@ function NetworkHealth({
   peers,
   isConnected,
   serverStatus,
+  healthDiagnostics,
 }: {
   peers: TerminalPeer[]
   isConnected: boolean
   serverStatus: TerminalData['serverStatus']
+  healthDiagnostics: TerminalHealthDiagnostics | null
 }) {
   const avgRep = averageReputation(peers) * 100
   const connected = peers.filter((p) => p.isConnected).length
+  const metrics = healthDiagnostics?.p2pMetrics
+  const security = healthDiagnostics?.security
+  const signedStreams = Boolean(security?.requestSigningRequired && security?.responseSigningRequired)
+  const authFailures = metrics?.authFailures ?? 0
+  const rejected = metrics?.requestsRejected ?? 0
 
   const rows = [
     { lbl: 'Connection', v: isConnected ? 'LIVE' : 'OFFLINE', b: isConnected ? 100 : 0, kind: isConnected ? 'pos' : 'neg' },
     { lbl: 'Database', v: serverStatus?.databaseConnected ? 'READY' : 'DOWN', b: serverStatus?.databaseConnected ? 100 : 0, kind: serverStatus?.databaseConnected ? 'pos' : 'neg' },
     { lbl: 'P2P Host', v: serverStatus?.p2pHostRunning ? 'RUNNING' : 'STOPPED', b: serverStatus?.p2pHostRunning ? 100 : 0, kind: serverStatus?.p2pHostRunning ? 'pos' : 'warn' },
+    { lbl: 'Signed Streams', v: signedStreams ? 'ENFORCED' : 'OPEN', b: signedStreams ? 100 : 0, kind: signedStreams ? 'pos' : 'neg' },
+    { lbl: 'Auth Failures', v: `${authFailures}`, b: authFailures > 0 ? 100 : 0, kind: authFailures > 0 ? 'neg' : 'pos' },
+    { lbl: 'P2P Requests', v: `${metrics?.requestsReceived ?? 0} / ${rejected} rej`, b: rejected > 0 ? 70 : 100, kind: rejected > 0 ? 'warn' : 'info' },
+    { lbl: 'Rows Received', v: `${metrics?.rowsReceived ?? 0}`, b: 100, kind: 'info' },
+    { lbl: 'Bytes Received', v: formatBytes(metrics?.bytesReceived ?? 0), b: 100, kind: 'info' },
     { lbl: 'Script Mgr', v: serverStatus?.scriptMgrRunning ? 'RUNNING' : 'STOPPED', b: serverStatus?.scriptMgrRunning ? 100 : 0, kind: serverStatus?.scriptMgrRunning ? 'pos' : 'warn' },
     { lbl: 'Avg Reputation', v: `${avgRep.toFixed(0)}%`, b: avgRep, kind: avgRep >= 50 ? 'pos' : 'warn' },
     { lbl: 'Connected Peers', v: `${connected} / ${peers.length}`, b: peers.length ? (connected / peers.length) * 100 : 0, kind: 'info' },

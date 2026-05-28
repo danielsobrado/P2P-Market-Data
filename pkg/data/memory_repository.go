@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // MemoryRepository is a small in-process Repository implementation used by
@@ -520,6 +522,15 @@ func (r *MemoryRepository) GetSplitData(ctx context.Context, symbol, startDate, 
 func (r *MemoryRepository) SaveTransfer(ctx context.Context, transfer *DataTransfer) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if transfer.ID == "" {
+		transfer.ID = uuid.New().String()
+	}
+	if transfer.StartTime.IsZero() {
+		transfer.StartTime = time.Now().UTC()
+	}
+	if transfer.Status == "" {
+		transfer.Status = "pending"
+	}
 	copyTransfer := *transfer
 	r.transfers[transfer.ID] = &copyTransfer
 	return nil

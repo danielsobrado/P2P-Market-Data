@@ -51,6 +51,65 @@ export interface ServerStatus {
   embeddedDbRunning: boolean
 }
 
+export interface P2PMetricsDiagnostics {
+  connectedPeers: number
+  totalPeers: number
+  messagesProcessed: number
+  networkLatencyMs: number
+  requestsReceived: number
+  requestsRejected: number
+  authFailures: number
+  transfersStarted: number
+  transfersComplete: number
+  transfersFailed: number
+  chunksSent: number
+  chunksReceived: number
+  rowsSent: number
+  rowsReceived: number
+  bytesSent: number
+  bytesReceived: number
+  lastError?: string
+  lastRequestAt?: string
+  lastTransferAt?: string
+  lastUpdated?: string
+}
+
+export interface SecurityHealthDiagnostics {
+  requestSigningRequired: boolean
+  responseSigningRequired: boolean
+  pubSubStrictSigning: boolean
+  keyFileConfigured: boolean
+  keyFileExists: boolean
+  authFailures: number
+  lastSecurityError?: string
+}
+
+export interface TransferSummaryDiagnostics {
+  pending: number
+  transferring: number
+  completed: number
+  failed: number
+}
+
+export interface AppHealthDiagnostics {
+  generatedAt: string
+  uptimeSeconds: number
+  status: ServerStatus
+  databaseUrl: string
+  databaseLatencyMs: number
+  requiredTables: Record<string, boolean>
+  p2pHostId: string
+  p2pListenAddresses: string[]
+  connectedPeers: string[]
+  p2pMetrics: P2PMetricsDiagnostics
+  transferSummary: TransferSummaryDiagnostics
+  security: SecurityHealthDiagnostics
+  scriptManagerRunning: boolean
+  pythonRuntime: string
+  latestTransferErrors: string[]
+  operationalWarnings: string[]
+}
+
 export {}
 
 declare global {
@@ -85,6 +144,7 @@ declare global {
           
           // Status
           GetServerStatus: () => Promise<ServerStatus>;
+          GetHealthDiagnostics: () => Promise<AppHealthDiagnostics>;
 
           // Error handling
           ResetDataConnection: () => Promise<void>;

@@ -1,23 +1,41 @@
 export namespace data {
-	
+
 	export class DataRequest {
+	    request_id?: string;
+	    transfer_id?: string;
+	    requester_peer_id?: string;
+	    requester_public_key?: number[];
+	    requested_at?: number;
+	    nonce?: string;
+	    signature?: number[];
 	    type: string;
 	    symbol: string;
 	    start_date: string;
 	    end_date: string;
 	    granularity: string;
-	
+	    offset?: number;
+	    chunk_size?: number;
+
 	    static createFrom(source: any = {}) {
 	        return new DataRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.request_id = source["request_id"];
+	        this.transfer_id = source["transfer_id"];
+	        this.requester_peer_id = source["requester_peer_id"];
+	        this.requester_public_key = source["requester_public_key"];
+	        this.requested_at = source["requested_at"];
+	        this.nonce = source["nonce"];
+	        this.signature = source["signature"];
 	        this.type = source["type"];
 	        this.symbol = source["symbol"];
 	        this.start_date = source["start_date"];
 	        this.end_date = source["end_date"];
 	        this.granularity = source["granularity"];
+	        this.offset = source["offset"];
+	        this.chunk_size = source["chunk_size"];
 	    }
 	}
 	export class DataSource {
@@ -33,11 +51,11 @@ export namespace data {
 	    // Go type: time
 	    last_update: any;
 	    reliability: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DataSource(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -50,7 +68,7 @@ export namespace data {
 	        this.last_update = this.convertValues(source["last_update"], null);
 	        this.reliability = source["reliability"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -94,11 +112,11 @@ export namespace data {
 	    declaration_date: any;
 	    frequency: string;
 	    type: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DividendData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -120,7 +138,7 @@ export namespace data {
 	        this.frequency = source["frequency"];
 	        this.type = source["type"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -158,11 +176,11 @@ export namespace data {
 	    adjusted_close: number;
 	    // Go type: time
 	    date: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EODData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -182,7 +200,7 @@ export namespace data {
 	        this.adjusted_close = source["adjusted_close"];
 	        this.date = this.convertValues(source["date"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -222,11 +240,11 @@ export namespace data {
 	    price_per_share: number;
 	    value: number;
 	    transaction_type: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InsiderTrade(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -248,7 +266,7 @@ export namespace data {
 	        this.value = source["value"];
 	        this.transaction_type = source["transaction_type"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -284,11 +302,11 @@ export namespace data {
 	    created_at: any;
 	    // Go type: time
 	    updated_at: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MarketData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -305,7 +323,7 @@ export namespace data {
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -336,11 +354,11 @@ export namespace data {
 	    DataType: string;
 	    Limit: number;
 	    Offset: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MarketDataFilter(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Symbol = source["Symbol"];
@@ -353,7 +371,7 @@ export namespace data {
 	        this.Limit = source["Limit"];
 	        this.Offset = source["Offset"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -387,11 +405,11 @@ export namespace data {
 	    updated_at: any;
 	    status: string;
 	    metadata?: Record<string, any>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Peer(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -406,7 +424,7 @@ export namespace data {
 	        this.status = source["status"];
 	        this.metadata = source["metadata"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -444,11 +462,11 @@ export namespace data {
 	    old_shares: number;
 	    new_shares: number;
 	    status: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SplitData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -467,7 +485,7 @@ export namespace data {
 	        this.new_shares = source["new_shares"];
 	        this.status = source["status"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -490,9 +508,10 @@ export namespace data {
 }
 
 export namespace main {
-	
+
 	export class ActiveTransfer {
 	    id: string;
+	    requestId?: string;
 	    type: string;
 	    symbol: string;
 	    source: string;
@@ -503,14 +522,21 @@ export namespace main {
 	    endTime?: string;
 	    size: number;
 	    speed: number;
-	
+	    error?: string;
+	    chunkSize?: number;
+	    totalRows?: number;
+	    totalChunks?: number;
+	    completedChunks?: number;
+	    resumeOffset?: number;
+
 	    static createFrom(source: any = {}) {
 	        return new ActiveTransfer(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.requestId = source["requestId"];
 	        this.type = source["type"];
 	        this.symbol = source["symbol"];
 	        this.source = source["source"];
@@ -521,6 +547,104 @@ export namespace main {
 	        this.endTime = source["endTime"];
 	        this.size = source["size"];
 	        this.speed = source["speed"];
+	        this.error = source["error"];
+	        this.chunkSize = source["chunkSize"];
+	        this.totalRows = source["totalRows"];
+	        this.totalChunks = source["totalChunks"];
+	        this.completedChunks = source["completedChunks"];
+	        this.resumeOffset = source["resumeOffset"];
+	    }
+	}
+	export class SecurityHealth {
+	    requestSigningRequired: boolean;
+	    responseSigningRequired: boolean;
+	    pubSubStrictSigning: boolean;
+	    keyFileConfigured: boolean;
+	    keyFileExists: boolean;
+	    authFailures: number;
+	    lastSecurityError?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SecurityHealth(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requestSigningRequired = source["requestSigningRequired"];
+	        this.responseSigningRequired = source["responseSigningRequired"];
+	        this.pubSubStrictSigning = source["pubSubStrictSigning"];
+	        this.keyFileConfigured = source["keyFileConfigured"];
+	        this.keyFileExists = source["keyFileExists"];
+	        this.authFailures = source["authFailures"];
+	        this.lastSecurityError = source["lastSecurityError"];
+	    }
+	}
+	export class TransferSummary {
+	    pending: number;
+	    transferring: number;
+	    completed: number;
+	    failed: number;
+
+	    static createFrom(source: any = {}) {
+	        return new TransferSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pending = source["pending"];
+	        this.transferring = source["transferring"];
+	        this.completed = source["completed"];
+	        this.failed = source["failed"];
+	    }
+	}
+	export class P2PMetrics {
+	    connectedPeers: number;
+	    totalPeers: number;
+	    messagesProcessed: number;
+	    networkLatencyMs: number;
+	    requestsReceived: number;
+	    requestsRejected: number;
+	    authFailures: number;
+	    transfersStarted: number;
+	    transfersComplete: number;
+	    transfersFailed: number;
+	    chunksSent: number;
+	    chunksReceived: number;
+	    rowsSent: number;
+	    rowsReceived: number;
+	    bytesSent: number;
+	    bytesReceived: number;
+	    lastError?: string;
+	    lastRequestAt?: string;
+	    lastTransferAt?: string;
+	    lastUpdated?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new P2PMetrics(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connectedPeers = source["connectedPeers"];
+	        this.totalPeers = source["totalPeers"];
+	        this.messagesProcessed = source["messagesProcessed"];
+	        this.networkLatencyMs = source["networkLatencyMs"];
+	        this.requestsReceived = source["requestsReceived"];
+	        this.requestsRejected = source["requestsRejected"];
+	        this.authFailures = source["authFailures"];
+	        this.transfersStarted = source["transfersStarted"];
+	        this.transfersComplete = source["transfersComplete"];
+	        this.transfersFailed = source["transfersFailed"];
+	        this.chunksSent = source["chunksSent"];
+	        this.chunksReceived = source["chunksReceived"];
+	        this.rowsSent = source["rowsSent"];
+	        this.rowsReceived = source["rowsReceived"];
+	        this.bytesSent = source["bytesSent"];
+	        this.bytesReceived = source["bytesReceived"];
+	        this.lastError = source["lastError"];
+	        this.lastRequestAt = source["lastRequestAt"];
+	        this.lastTransferAt = source["lastTransferAt"];
+	        this.lastUpdated = source["lastUpdated"];
 	    }
 	}
 	export class ServerStatus {
@@ -529,11 +653,11 @@ export namespace main {
 	    p2pHostRunning: boolean;
 	    scriptMgrRunning: boolean;
 	    embeddedDbRunning: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ServerStatus(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.running = source["running"];
@@ -545,34 +669,46 @@ export namespace main {
 	}
 	export class AppHealthDiagnostics {
 	    generatedAt: string;
+	    uptimeSeconds: number;
 	    status: ServerStatus;
 	    databaseUrl: string;
+	    databaseLatencyMs: number;
 	    requiredTables: Record<string, boolean>;
 	    p2pHostId: string;
 	    p2pListenAddresses: string[];
 	    connectedPeers: string[];
+	    p2pMetrics: P2PMetrics;
+	    transferSummary: TransferSummary;
+	    security: SecurityHealth;
 	    scriptManagerRunning: boolean;
 	    pythonRuntime: string;
 	    latestTransferErrors: string[];
-	
+	    operationalWarnings: string[];
+
 	    static createFrom(source: any = {}) {
 	        return new AppHealthDiagnostics(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.generatedAt = source["generatedAt"];
+	        this.uptimeSeconds = source["uptimeSeconds"];
 	        this.status = this.convertValues(source["status"], ServerStatus);
 	        this.databaseUrl = source["databaseUrl"];
+	        this.databaseLatencyMs = source["databaseLatencyMs"];
 	        this.requiredTables = source["requiredTables"];
 	        this.p2pHostId = source["p2pHostId"];
 	        this.p2pListenAddresses = source["p2pListenAddresses"];
 	        this.connectedPeers = source["connectedPeers"];
+	        this.p2pMetrics = this.convertValues(source["p2pMetrics"], P2PMetrics);
+	        this.transferSummary = this.convertValues(source["transferSummary"], TransferSummary);
+	        this.security = this.convertValues(source["security"], SecurityHealth);
 	        this.scriptManagerRunning = source["scriptManagerRunning"];
 	        this.pythonRuntime = source["pythonRuntime"];
 	        this.latestTransferErrors = source["latestTransferErrors"];
+	        this.operationalWarnings = source["operationalWarnings"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -591,6 +727,7 @@ export namespace main {
 		    return a;
 		}
 	}
+
 	export class ScriptInfo {
 	    id: string;
 	    name: string;
@@ -602,11 +739,11 @@ export namespace main {
 	    updated: string;
 	    status: string;
 	    isInstalled: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ScriptInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -621,6 +758,8 @@ export namespace main {
 	        this.isInstalled = source["isInstalled"];
 	    }
 	}
+
+
 
 }
 

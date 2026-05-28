@@ -3,11 +3,15 @@ export type MarketDataType = 'EOD' | 'DIVIDEND' | 'INSIDER_TRADE' | 'SPLIT'
 export type TimeGranularity = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'
 
 export interface DataRequest {
+  requestId?: string
+  transferId?: string
   type: string
   symbol: string
   startDate: string
   endDate: string
   granularity: TimeGranularity
+  offset?: number
+  chunkSize?: number
 }
 
 // First create the base interface
@@ -77,6 +81,7 @@ export interface DataSource {
 
 export interface DataTransfer {
   id: string
+  requestId?: string
   type: MarketDataType
   symbol: string
   source: string
@@ -87,5 +92,11 @@ export interface DataTransfer {
   endTime?: string
   size: number
   speed: number
+  error?: string
+  chunkSize?: number
+  totalRows?: number
+  totalChunks?: number
+  completedChunks?: number
+  resumeOffset?: number
 }
 

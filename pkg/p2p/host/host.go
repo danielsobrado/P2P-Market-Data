@@ -59,9 +59,10 @@ type Host struct {
 	validation chan *message.ValidationRequest
 
 	// Metrics and state
-	metrics *Metrics
-	status  *Status
-	mu      sync.RWMutex
+	metrics     *Metrics
+	status      *Status
+	requestAuth *requestAuthTracker
+	mu          sync.RWMutex
 
 	networkMgr *NetworkManager
 
@@ -126,21 +127,22 @@ func NewHost(ctx context.Context, cfg *config.Config, logger *zap.Logger, repo d
 	peerStore := NewPeerStore(repo)
 
 	host := &Host{
-		cfg:        &cfg.P2P,
-		host:       h,
-		pubsub:     ps,
-		topics:     make(map[string]*pubsub.Topic),
-		subs:       make(map[string]*pubsub.Subscription),
-		repo:       repo,
-		peerStore:  peerStore,
-		validator:  validator,
-		logger:     logger,
-		shutdown:   make(chan struct{}),
-		msgQueue:   make(chan *message.Message, 1000),
-		validation: make(chan *message.ValidationRequest, 100),
-		metrics:    NewMetrics(),
-		status:     NewStatus(),
-		ctx:        ctx,
+		cfg:         &cfg.P2P,
+		host:        h,
+		pubsub:      ps,
+		topics:      make(map[string]*pubsub.Topic),
+		subs:        make(map[string]*pubsub.Subscription),
+		repo:        repo,
+		peerStore:   peerStore,
+		validator:   validator,
+		logger:      logger,
+		shutdown:    make(chan struct{}),
+		msgQueue:    make(chan *message.Message, 1000),
+		validation:  make(chan *message.ValidationRequest, 100),
+		metrics:     NewMetrics(),
+		status:      NewStatus(),
+		requestAuth: newRequestAuthTracker(),
+		ctx:         ctx,
 	}
 
 	// Initialize host components
@@ -693,6 +695,16 @@ func (h *Host) RequestData(ctx context.Context, peerID string, request data.Data
 		return fmt.Errorf("network manager not initialized")
 	}
 	return h.networkMgr.RequestData(ctx, peerID, request)
+}
+
+func (h *Host) MetricsSnapshot() MetricsSnapshot {
+	if h == nil || h.metrics == nil {
+		return MetricsSnapshot{}
+	}
+	if h.host != nil {
+		h.metrics.Collect(h)
+	}
+	return h.metrics.Snapshot()
 }
 
 func (h *Host) ResetConnection() error {
