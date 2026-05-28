@@ -6,6 +6,7 @@ import type {
   TerminalInsiderRow,
   TerminalPeer,
   TerminalScript,
+  TerminalSplitRow,
   TerminalTransfer,
   TickerItem,
 } from './types'
@@ -206,6 +207,24 @@ export function adaptInsiderRows(raw: unknown): TerminalInsiderRow[] {
       value: num(r.value),
       form: str(meta?.form ?? r.secForm ?? '4'),
       source: str(r.source),
+    }
+  })
+}
+
+export function adaptSplitRows(raw: unknown): TerminalSplitRow[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => {
+    const r = item as RawRecord
+    const meta = r.metadata as RawRecord | undefined
+    return {
+      symbol: str(r.symbol),
+      exDate: formatDate(r.ex_date ?? r.exDate),
+      announcementDate: formatDate(r.announcement_date ?? r.announcementDate),
+      ratio: num(r.split_ratio ?? r.splitRatio),
+      oldShares: num(r.old_shares ?? r.oldShares),
+      newShares: num(r.new_shares ?? r.newShares),
+      status: str(r.status, 'completed'),
+      source: str(r.source ?? meta?.source),
     }
   })
 }

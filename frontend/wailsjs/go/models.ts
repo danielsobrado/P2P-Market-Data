@@ -425,6 +425,67 @@ export namespace data {
 		    return a;
 		}
 	}
+	export class SplitData {
+	    id: string;
+	    symbol: string;
+	    // Go type: time
+	    timestamp: any;
+	    source: string;
+	    data_type: string;
+	    validation_score: number;
+	    up_votes: number;
+	    down_votes: number;
+	    metadata: Record<string, string>;
+	    split_ratio: number;
+	    // Go type: time
+	    announcement_date: any;
+	    // Go type: time
+	    ex_date: any;
+	    old_shares: number;
+	    new_shares: number;
+	    status: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SplitData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.symbol = source["symbol"];
+	        this.timestamp = this.convertValues(source["timestamp"], null);
+	        this.source = source["source"];
+	        this.data_type = source["data_type"];
+	        this.validation_score = source["validation_score"];
+	        this.up_votes = source["up_votes"];
+	        this.down_votes = source["down_votes"];
+	        this.metadata = source["metadata"];
+	        this.split_ratio = source["split_ratio"];
+	        this.announcement_date = this.convertValues(source["announcement_date"], null);
+	        this.ex_date = this.convertValues(source["ex_date"], null);
+	        this.old_shares = source["old_shares"];
+	        this.new_shares = source["new_shares"];
+	        this.status = source["status"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
 
@@ -462,6 +523,74 @@ export namespace main {
 	        this.speed = source["speed"];
 	    }
 	}
+	export class ServerStatus {
+	    running: boolean;
+	    databaseConnected: boolean;
+	    p2pHostRunning: boolean;
+	    scriptMgrRunning: boolean;
+	    embeddedDbRunning: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ServerStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.running = source["running"];
+	        this.databaseConnected = source["databaseConnected"];
+	        this.p2pHostRunning = source["p2pHostRunning"];
+	        this.scriptMgrRunning = source["scriptMgrRunning"];
+	        this.embeddedDbRunning = source["embeddedDbRunning"];
+	    }
+	}
+	export class AppHealthDiagnostics {
+	    generatedAt: string;
+	    status: ServerStatus;
+	    databaseUrl: string;
+	    requiredTables: Record<string, boolean>;
+	    p2pHostId: string;
+	    p2pListenAddresses: string[];
+	    connectedPeers: string[];
+	    scriptManagerRunning: boolean;
+	    pythonRuntime: string;
+	    latestTransferErrors: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AppHealthDiagnostics(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generatedAt = source["generatedAt"];
+	        this.status = this.convertValues(source["status"], ServerStatus);
+	        this.databaseUrl = source["databaseUrl"];
+	        this.requiredTables = source["requiredTables"];
+	        this.p2pHostId = source["p2pHostId"];
+	        this.p2pListenAddresses = source["p2pListenAddresses"];
+	        this.connectedPeers = source["connectedPeers"];
+	        this.scriptManagerRunning = source["scriptManagerRunning"];
+	        this.pythonRuntime = source["pythonRuntime"];
+	        this.latestTransferErrors = source["latestTransferErrors"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ScriptInfo {
 	    id: string;
 	    name: string;
@@ -490,26 +619,6 @@ export namespace main {
 	        this.updated = source["updated"];
 	        this.status = source["status"];
 	        this.isInstalled = source["isInstalled"];
-	    }
-	}
-	export class ServerStatus {
-	    running: boolean;
-	    databaseConnected: boolean;
-	    p2pHostRunning: boolean;
-	    scriptMgrRunning: boolean;
-	    embeddedDbRunning: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new ServerStatus(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.running = source["running"];
-	        this.databaseConnected = source["databaseConnected"];
-	        this.p2pHostRunning = source["p2pHostRunning"];
-	        this.scriptMgrRunning = source["scriptMgrRunning"];
-	        this.embeddedDbRunning = source["embeddedDbRunning"];
 	    }
 	}
 

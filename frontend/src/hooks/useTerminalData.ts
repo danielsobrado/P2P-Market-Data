@@ -8,6 +8,7 @@ import {
   adaptInsiderRows,
   adaptPeers,
   adaptScripts,
+  adaptSplitRows,
   adaptTransfers,
   buildTickerFromEOD,
   connectedPeerCount,
@@ -25,6 +26,7 @@ import type {
   TerminalInsiderRow,
   TerminalPeer,
   TerminalScript,
+  TerminalSplitRow,
   TerminalTransfer,
   TickerItem,
 } from '@/lib/terminal/types'
@@ -46,6 +48,7 @@ export function useTerminalData() {
   const [eodData, setEodData] = useState<TerminalEODRow[]>([])
   const [dividendData, setDividendData] = useState<TerminalDividendRow[]>([])
   const [insiderData, setInsiderData] = useState<TerminalInsiderRow[]>([])
+  const [splitData, setSplitData] = useState<TerminalSplitRow[]>([])
   const [marketQuery, setMarketQuery] = useState<MarketQuery>({
     symbol: 'AAPL',
     startDate: defaults.startDate,
@@ -103,10 +106,11 @@ export function useTerminalData() {
       setMarketLoading(true)
       setMarketQuery(query)
 
-      const [eodResult, divResult, insiderResult] = await Promise.allSettled([
+      const [eodResult, divResult, insiderResult, splitResult] = await Promise.allSettled([
         app().GetEODData(query.symbol, query.startDate, query.endDate),
         app().GetDividendData(query.symbol, query.startDate, query.endDate),
         app().GetInsiderData(query.symbol, query.startDate, query.endDate),
+        app().GetSplitData(query.symbol, query.startDate, query.endDate),
       ])
 
       let loaded = 0
@@ -135,8 +139,16 @@ export function useTerminalData() {
         pushLog('err', `Insider fetch failed: ${message}`)
       }
 
+      if (splitResult.status === 'fulfilled') {
+        setSplitData(adaptSplitRows(splitResult.value))
+        loaded++
+      } else {
+        const message = splitResult.reason instanceof Error ? splitResult.reason.message : String(splitResult.reason)
+        pushLog('err', `Split fetch failed: ${message}`)
+      }
+
       if (loaded > 0) {
-        pushLog('ok', `Market data loaded for ${query.symbol} (${loaded}/3 datasets)`)
+        pushLog('ok', `Market data loaded for ${query.symbol} (${loaded}/4 datasets)`)
         setError(null)
       } else {
         const message = 'All market data requests failed'
@@ -315,6 +327,7 @@ export function useTerminalData() {
     eodData,
     dividendData,
     insiderData,
+    splitData,
     marketQuery,
     searchQuery,
     lastRefresh,

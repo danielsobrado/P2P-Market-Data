@@ -26,6 +26,10 @@ export function GetEODData(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetEODData'](arg1, arg2, arg3);
 }
 
+export function GetHealthDiagnostics() {
+  return window['go']['main']['App']['GetHealthDiagnostics']();
+}
+
 export function GetInsiderData(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetInsiderData'](arg1, arg2, arg3);
 }
@@ -44,6 +48,10 @@ export function GetScripts() {
 
 export function GetServerStatus() {
   return window['go']['main']['App']['GetServerStatus']();
+}
+
+export function GetSplitData(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetSplitData'](arg1, arg2, arg3);
 }
 
 export function InstallScript(arg1) {

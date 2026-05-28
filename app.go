@@ -3,10 +3,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -38,6 +40,9 @@ type App struct {
 	mu      sync.RWMutex
 	running bool
 	cleanup []func() error
+
+	scriptInstall     map[string]bool
+	scriptInstallPath string
 }
 
 // ServerStatus represents the status of the application's core services
@@ -47,6 +52,20 @@ type ServerStatus struct {
 	P2PHostRunning    bool `json:"p2pHostRunning"`
 	ScriptMgrRunning  bool `json:"scriptMgrRunning"`
 	EmbeddedDBRunning bool `json:"embeddedDbRunning"`
+}
+
+// AppHealthDiagnostics is a frontend-facing snapshot for beta support and smoke checks.
+type AppHealthDiagnostics struct {
+	GeneratedAt          string          `json:"generatedAt"`
+	Status               ServerStatus    `json:"status"`
+	DatabaseURL          string          `json:"databaseUrl"`
+	RequiredTables       map[string]bool `json:"requiredTables"`
+	P2PHostID            string          `json:"p2pHostId"`
+	P2PListenAddresses   []string        `json:"p2pListenAddresses"`
+	ConnectedPeers       []string        `json:"connectedPeers"`
+	ScriptManagerRunning bool            `json:"scriptManagerRunning"`
+	PythonRuntime        string          `json:"pythonRuntime"`
+	LatestTransferErrors []string        `json:"latestTransferErrors"`
 }
 
 // ScriptInfo is a frontend-facing script list payload.
@@ -76,6 +95,16 @@ type ActiveTransfer struct {
 	EndTime     string  `json:"endTime,omitempty"`
 	Size        int64   `json:"size"`
 	Speed       float64 `json:"speed"`
+}
+
+type splitRepository interface {
+	SaveSplitData(context.Context, *data.SplitData) error
+	GetSplitData(context.Context, string, string, string) ([]data.SplitData, error)
+}
+
+type transferRepository interface {
+	SaveTransfer(context.Context, *data.DataTransfer) error
+	ListTransfers(context.Context) ([]data.DataTransfer, error)
 }
 
 // NewApp creates a new application instance using the provided configuration.
@@ -120,14 +149,51 @@ func NewApp(cfg *config.Config) (*App, error) {
 	if cfg.Scripts.ScriptDir == "scripts" {
 		cfg.Scripts.ScriptDir = "./data/scripts"
 	}
+	scriptInstallPath := filepath.Join(cfg.Scripts.ScriptDir, ".install_state.json")
+	scriptInstall := loadScriptInstallState(scriptInstallPath, zapLogger)
 
 	return &App{
-		ctx:     ctx,
-		cancel:  cancel,
-		logger:  zapLogger,
-		config:  cfg,
-		cleanup: make([]func() error, 0),
+		ctx:               ctx,
+		cancel:            cancel,
+		logger:            zapLogger,
+		config:            cfg,
+		cleanup:           make([]func() error, 0),
+		scriptInstall:     scriptInstall,
+		scriptInstallPath: scriptInstallPath,
 	}, nil
+}
+
+func loadScriptInstallState(path string, logger *zap.Logger) map[string]bool {
+	state := make(map[string]bool)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Warn("failed to read script install state", zap.String("path", path), zap.Error(err))
+		}
+		return state
+	}
+	if err := json.Unmarshal(content, &state); err != nil {
+		logger.Warn("failed to parse script install state", zap.String("path", path), zap.Error(err))
+		return make(map[string]bool)
+	}
+	return state
+}
+
+func (a *App) saveScriptInstallState() error {
+	if a.scriptInstallPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(a.scriptInstallPath), 0755); err != nil {
+		return fmt.Errorf("creating script install state directory: %w", err)
+	}
+	content, err := json.MarshalIndent(a.scriptInstall, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding script install state: %w", err)
+	}
+	if err := os.WriteFile(a.scriptInstallPath, content, 0644); err != nil {
+		return fmt.Errorf("writing script install state: %w", err)
+	}
+	return nil
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -305,6 +371,9 @@ func (a *App) RunScript(scriptID string) error {
 	if a.scriptMgr == nil {
 		return errors.New("script manager not initialized")
 	}
+	if installed, ok := a.scriptInstall[scriptID]; ok && !installed {
+		return fmt.Errorf("script %s is not installed", scriptID)
+	}
 	return a.scriptMgr.StartScript(a.ctx, scriptID, nil)
 }
 
@@ -330,6 +399,14 @@ func (a *App) GetScripts() ([]ScriptInfo, error) {
 		if a.scriptMgr.Executor.IsScriptRunning(scriptPath) {
 			status = "running"
 		}
+		isInstalled, ok := a.scriptInstall[s.ID]
+		if !ok {
+			isInstalled = true
+			a.scriptInstall[s.ID] = true
+			if err := a.saveScriptInstallState(); err != nil {
+				a.logger.Warn("failed to persist default script install state", zap.String("scriptID", s.ID), zap.Error(err))
+			}
+		}
 		result = append(result, ScriptInfo{
 			ID:          s.ID,
 			Name:        s.Name,
@@ -340,7 +417,7 @@ func (a *App) GetScripts() ([]ScriptInfo, error) {
 			Created:     s.Created.Format(time.RFC3339),
 			Updated:     s.Updated.Format(time.RFC3339),
 			Status:      status,
-			IsInstalled: true,
+			IsInstalled: isInstalled,
 		})
 	}
 	return result, nil
@@ -464,6 +541,58 @@ func (a *App) GetServerStatus() ServerStatus {
 	return status
 }
 
+// GetHealthDiagnostics returns a structured snapshot of app dependencies for beta support.
+func (a *App) GetHealthDiagnostics() AppHealthDiagnostics {
+	status := a.GetServerStatus()
+	diagnostics := AppHealthDiagnostics{
+		GeneratedAt:          time.Now().UTC().Format(time.RFC3339),
+		Status:               status,
+		DatabaseURL:          a.config.Database.URL,
+		RequiredTables:       make(map[string]bool),
+		ScriptManagerRunning: status.ScriptMgrRunning,
+		PythonRuntime:        a.config.Scripts.PythonPath,
+	}
+
+	if a.peerHost != nil {
+		diagnostics.P2PHostID = a.peerHost.ID().String()
+		diagnostics.P2PListenAddresses = a.peerHost.FullAddrs()
+		diagnostics.ConnectedPeers = a.peerHost.ConnectedPeers()
+	}
+
+	requiredTables := []string{"market_data", "data_sources", "splits", "transfers", "scripts", "peers"}
+	if a.conn != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		for _, table := range requiredTables {
+			var exists bool
+			err := a.conn.QueryRow(ctx, `
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = $1
+                )`, table).Scan(&exists)
+			diagnostics.RequiredTables[table] = err == nil && exists
+		}
+	}
+
+	if repo, ok := a.repo.(transferRepository); ok {
+		transfers, err := repo.ListTransfers(a.ctx)
+		if err == nil {
+			for _, transfer := range transfers {
+				if transfer.Status == "failed" && transfer.Error != "" {
+					diagnostics.LatestTransferErrors = append(diagnostics.LatestTransferErrors,
+						fmt.Sprintf("%s %s %s: %s", transfer.Type, transfer.Symbol, transfer.StartTime.Format(time.RFC3339), transfer.Error))
+					if len(diagnostics.LatestTransferErrors) >= 5 {
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return diagnostics
+}
+
 func (a *App) SearchData(request data.DataRequest) ([]data.DataSource, error) {
 	if a.repo == nil {
 		return nil, errors.New("repository not initialized")
@@ -472,10 +601,50 @@ func (a *App) SearchData(request data.DataRequest) ([]data.DataSource, error) {
 }
 
 func (a *App) RequestData(peerID string, request data.DataRequest) error {
-	if a.peerHost == nil {
-		return errors.New("peer host not initialized")
+	transfers, ok := a.repo.(transferRepository)
+	if !ok {
+		return errors.New("transfer repository not available")
 	}
-	return a.peerHost.RequestData(a.ctx, peerID, request)
+
+	transfer := &data.DataTransfer{
+		Type:        request.Type,
+		Symbol:      request.Symbol,
+		Source:      peerID,
+		Destination: "local",
+		Progress:    0,
+		Status:      "pending",
+		StartTime:   time.Now().UTC(),
+	}
+	if err := transfers.SaveTransfer(a.ctx, transfer); err != nil {
+		return err
+	}
+
+	if peerID != "local" {
+		if a.peerHost == nil {
+			transfer.Status = "failed"
+			transfer.Error = "peer host not initialized"
+			transfer.EndTime = time.Now().UTC()
+			_ = transfers.SaveTransfer(a.ctx, transfer)
+			return errors.New(transfer.Error)
+		}
+		if err := a.peerHost.RequestData(a.ctx, peerID, request); err != nil {
+			transfer.Status = "failed"
+			transfer.Error = err.Error()
+			transfer.EndTime = time.Now().UTC()
+			_ = transfers.SaveTransfer(a.ctx, transfer)
+			return err
+		}
+	}
+
+	transfer.Status = "completed"
+	transfer.Progress = 100
+	transfer.EndTime = time.Now().UTC()
+	elapsed := transfer.EndTime.Sub(transfer.StartTime).Seconds()
+	transfer.Size = estimateTransferSize(request)
+	if elapsed > 0 {
+		transfer.Speed = float64(transfer.Size) / elapsed
+	}
+	return transfers.SaveTransfer(a.ctx, transfer)
 }
 
 func (a *App) GetInsiderData(symbol, startDate, endDate string) ([]data.InsiderTrade, error) {
@@ -485,9 +654,46 @@ func (a *App) GetInsiderData(symbol, startDate, endDate string) ([]data.InsiderT
 	return a.repo.GetInsiderData(a.ctx, symbol, startDate, endDate)
 }
 
+func (a *App) GetSplitData(symbol, startDate, endDate string) ([]data.SplitData, error) {
+	if a.repo == nil {
+		return nil, errors.New("repository not initialized")
+	}
+	repo, ok := a.repo.(splitRepository)
+	if !ok {
+		return nil, errors.New("split repository not available")
+	}
+	return repo.GetSplitData(a.ctx, symbol, startDate, endDate)
+}
+
 func (a *App) GetActiveTransfers() ([]ActiveTransfer, error) {
-	// Transfer tracking is not yet persisted; return a stable empty payload.
-	return []ActiveTransfer{}, nil
+	repo, ok := a.repo.(transferRepository)
+	if !ok {
+		return []ActiveTransfer{}, nil
+	}
+	transfers, err := repo.ListTransfers(a.ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ActiveTransfer, 0, len(transfers))
+	for _, transfer := range transfers {
+		item := ActiveTransfer{
+			ID:          transfer.ID,
+			Type:        transfer.Type,
+			Symbol:      transfer.Symbol,
+			Source:      transfer.Source,
+			Destination: transfer.Destination,
+			Progress:    transfer.Progress,
+			Status:      transfer.Status,
+			StartTime:   transfer.StartTime.Format(time.RFC3339),
+			Size:        transfer.Size,
+			Speed:       transfer.Speed,
+		}
+		if !transfer.EndTime.IsZero() {
+			item.EndTime = transfer.EndTime.Format(time.RFC3339)
+		}
+		result = append(result, item)
+	}
+	return result, nil
 }
 
 func (a *App) ResetDataConnection() error {
@@ -529,30 +735,107 @@ func (a *App) UploadMarketData(payload map[string]interface{}) error {
 		return errors.New("repository not initialized")
 	}
 
-	symbol, _ := payload["symbol"].(string)
-	source, _ := payload["source"].(string)
-	dataType, _ := payload["type"].(string)
-	price, _ := payload["price"].(float64)
-	volume, _ := payload["volume"].(float64)
+	symbol := payloadString(payload, "symbol", "")
+	source := payloadString(payload, "source", "manual_upload")
+	dataType := payloadString(payload, "type", data.DataTypeEOD)
 
-	if dataType == "" {
-		dataType = data.DataTypeEOD
+	switch dataType {
+	case data.DataTypeDividend:
+		return a.uploadDividendData(symbol, source, payload)
+	case data.DataTypeSplit:
+		return a.uploadSplitData(symbol, source, payload)
+	default:
+		return a.uploadEODMarketData(symbol, source, dataType, payload)
 	}
-	if source == "" {
-		source = "manual_upload"
-	}
-	if volume == 0 {
-		volume = 1
-	}
-	if price == 0 {
-		price = 1
-	}
+}
 
+func (a *App) uploadEODMarketData(symbol, source, dataType string, payload map[string]interface{}) error {
+	price := payloadFloat(payload, "price", payloadFloat(payload, "close", 1))
+	volume := payloadFloat(payload, "volume", 1)
 	marketData, err := data.NewMarketData(symbol, price, volume, source, dataType)
 	if err != nil {
 		return err
 	}
+	if dateText := payloadString(payload, "date", ""); dateText != "" {
+		if ts, err := time.Parse("2006-01-02", dateText); err == nil {
+			marketData.Timestamp = ts
+		}
+	}
+	open := payloadFloat(payload, "open", price)
+	high := payloadFloat(payload, "high", price)
+	low := payloadFloat(payload, "low", price)
+	closePrice := payloadFloat(payload, "close", price)
+	marketData.Price = closePrice
+	marketData.MetaData["open"] = strconv.FormatFloat(open, 'f', -1, 64)
+	marketData.MetaData["high"] = strconv.FormatFloat(high, 'f', -1, 64)
+	marketData.MetaData["low"] = strconv.FormatFloat(low, 'f', -1, 64)
+	marketData.MetaData["close"] = strconv.FormatFloat(closePrice, 'f', -1, 64)
+	marketData.MetaData["adjusted_close"] = strconv.FormatFloat(payloadFloat(payload, "adjustedClose", closePrice), 'f', -1, 64)
+	marketData.MetaData["volume"] = strconv.FormatFloat(volume, 'f', -1, 64)
+	marketData.UpdateHash()
 	return a.repo.SaveMarketData(a.ctx, marketData)
+}
+
+func (a *App) uploadDividendData(symbol, source string, payload map[string]interface{}) error {
+	exDate, err := payloadDate(payload, "exDate", time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	dividend := &data.DividendData{
+		MarketDataBase: data.MarketDataBase{
+			ID:        payloadString(payload, "id", fmt.Sprintf("%s-%s-dividend", symbol, exDate.Format("2006-01-02"))),
+			Symbol:    symbol,
+			Timestamp: exDate,
+			Source:    source,
+			DataType:  data.DataTypeDividend,
+			Metadata:  map[string]string{},
+		},
+		Amount:    payloadFloat(payload, "amount", payloadFloat(payload, "price", 0)),
+		Currency:  payloadString(payload, "currency", "USD"),
+		ExDate:    exDate,
+		Frequency: payloadString(payload, "frequency", ""),
+		Type:      payloadString(payload, "dividendType", "cash"),
+	}
+	if dividend.Amount <= 0 {
+		return errors.New("dividend amount must be positive")
+	}
+	return a.repo.SaveDividendData(a.ctx, dividend)
+}
+
+func (a *App) uploadSplitData(symbol, source string, payload map[string]interface{}) error {
+	repo, ok := a.repo.(splitRepository)
+	if !ok {
+		return errors.New("split repository not available")
+	}
+	exDate, err := payloadDate(payload, "exDate", time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	oldShares := int(payloadFloat(payload, "oldShares", 1))
+	newShares := int(payloadFloat(payload, "newShares", payloadFloat(payload, "ratio", 2)))
+	ratio := payloadFloat(payload, "ratio", 0)
+	if ratio == 0 && oldShares > 0 {
+		ratio = float64(newShares) / float64(oldShares)
+	}
+	split := &data.SplitData{
+		MarketDataBase: data.MarketDataBase{
+			ID:        payloadString(payload, "id", fmt.Sprintf("%s-%s-split", symbol, exDate.Format("2006-01-02"))),
+			Symbol:    symbol,
+			Timestamp: exDate,
+			Source:    source,
+			DataType:  data.DataTypeSplit,
+			Metadata:  map[string]string{},
+		},
+		SplitRatio: ratio,
+		ExDate:     exDate,
+		OldShares:  oldShares,
+		NewShares:  newShares,
+		Status:     payloadString(payload, "status", "completed"),
+	}
+	if announcementDate, err := payloadDate(payload, "announcementDate", time.Time{}); err == nil {
+		split.AnnouncementDate = announcementDate
+	}
+	return repo.SaveSplitData(a.ctx, split)
 }
 
 func (a *App) UploadScript(scriptData map[string]string) error {
@@ -572,22 +855,123 @@ func (a *App) UploadScript(scriptData map[string]string) error {
 		Author:      scriptData["author"],
 		Version:     scriptData["version"],
 	}
-	return a.scriptMgr.AddScript(name, []byte(content), metadata)
+	if err := a.scriptMgr.AddScript(name, []byte(content), metadata); err != nil {
+		return err
+	}
+	a.scriptInstall[metadata.ID] = true
+	return a.saveScriptInstallState()
 }
 
 func (a *App) DeleteScript(scriptID string) error {
 	if a.scriptMgr == nil {
 		return errors.New("script manager not initialized")
 	}
-	return a.scriptMgr.DeleteScript(scriptID)
+	delete(a.scriptInstall, scriptID)
+	if err := a.scriptMgr.DeleteScript(scriptID); err != nil {
+		return err
+	}
+	return a.saveScriptInstallState()
 }
 
 func (a *App) InstallScript(scriptID string) error {
-	// Installation lifecycle is currently equivalent to script availability.
-	_, err := a.scriptMgr.GetScript(scriptID)
-	return err
+	if a.scriptMgr == nil {
+		return errors.New("script manager not initialized")
+	}
+	if _, err := a.scriptMgr.GetScript(scriptID); err != nil {
+		return err
+	}
+	a.scriptInstall[scriptID] = true
+	return a.saveScriptInstallState()
 }
 
 func (a *App) UninstallScript(scriptID string) error {
-	return a.DeleteScript(scriptID)
+	if a.scriptMgr == nil {
+		return errors.New("script manager not initialized")
+	}
+	if _, err := a.scriptMgr.GetScript(scriptID); err != nil {
+		return err
+	}
+	if err := a.StopScript(scriptID); err != nil {
+		a.logger.Warn("failed to stop script during uninstall", zap.String("scriptID", scriptID), zap.Error(err))
+	}
+	a.scriptInstall[scriptID] = false
+	return a.saveScriptInstallState()
+}
+
+func estimateTransferSize(request data.DataRequest) int64 {
+	days := 1
+	start, startErr := time.Parse("2006-01-02", request.StartDate)
+	end, endErr := time.Parse("2006-01-02", request.EndDate)
+	if startErr == nil && endErr == nil && !end.Before(start) {
+		days = int(end.Sub(start).Hours()/24) + 1
+	}
+	switch request.Granularity {
+	case "WEEKLY":
+		days = maxInt(1, days/7)
+	case "MONTHLY":
+		days = maxInt(1, days/30)
+	case "YEARLY":
+		days = maxInt(1, days/365)
+	}
+	switch request.Type {
+	case data.DataTypeInsiderTrade:
+		return int64(days * 384)
+	case data.DataTypeDividend, data.DataTypeSplit:
+		return int64(days * 128)
+	default:
+		return int64(days * 256)
+	}
+}
+
+func payloadString(payload map[string]interface{}, key, fallback string) string {
+	if value, ok := payload[key]; ok && value != nil {
+		if text, ok := value.(string); ok && text != "" {
+			return text
+		}
+		return fmt.Sprint(value)
+	}
+	return fallback
+}
+
+func payloadFloat(payload map[string]interface{}, key string, fallback float64) float64 {
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	switch v := value.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case string:
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func payloadDate(payload map[string]interface{}, key string, fallback time.Time) (time.Time, error) {
+	value := payloadString(payload, key, "")
+	if value == "" {
+		return fallback, nil
+	}
+	for _, layout := range []string{"2006-01-02", time.RFC3339} {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid %s date", key)
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

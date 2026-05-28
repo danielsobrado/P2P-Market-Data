@@ -89,6 +89,17 @@ export interface TerminalInsiderRow {
   source: string
 }
 
+export interface TerminalSplitRow {
+  symbol: string
+  exDate: string
+  announcementDate: string
+  ratio: number
+  oldShares: number
+  newShares: number
+  status: string
+  source: string
+}
+
 export interface TickerItem {
   symbol: string
   price: number
@@ -126,6 +137,7 @@ export interface TerminalState {
   eodData: TerminalEODRow[]
   dividendData: TerminalDividendRow[]
   insiderData: TerminalInsiderRow[]
+  splitData: TerminalSplitRow[]
   marketQuery: MarketQuery
   searchQuery: SearchQuery
   lastRefresh: Date | null

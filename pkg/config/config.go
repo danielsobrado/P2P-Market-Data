@@ -86,12 +86,19 @@ func Load(configPath string) (*Config, error) {
 	setDefaults(v)
 
 	// Read the config file
-	v.SetConfigFile(configPath)
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+	if configPath != "" {
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("failed to read config file: %w", err)
+			}
+		} else {
+			v.SetConfigType(configType(configPath))
+			sanitized := strings.ReplaceAll(string(content), "\t", "  ")
+			if err := v.ReadConfig(strings.NewReader(sanitized)); err != nil {
+				return nil, fmt.Errorf("failed to read config file: %w", err)
+			}
 		}
-		// Config file not found, will rely on defaults and env vars
 	}
 
 	// Override with environment variables
@@ -111,6 +118,17 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func configType(configPath string) string {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(configPath)), ".")
+	if ext == "yml" {
+		return "yaml"
+	}
+	if ext == "" {
+		return "yaml"
+	}
+	return ext
 }
 
 // setDefaults sets default values for all configuration options
@@ -161,6 +179,8 @@ func setDefaults(v *viper.Viper) {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
+	c.applyFallbackDefaults()
+
 	// Validate Database configuration
 	if err := c.validateDatabase(); err != nil {
 		return fmt.Errorf("database config: %w", err)
@@ -189,6 +209,42 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+func (c *Config) applyFallbackDefaults() {
+	if c.Database.Type == "" {
+		c.Database.Type = "postgres"
+	}
+	if c.Database.URL == "" {
+		c.Database.URL = "postgres://postgres:postgres@localhost:5433/market_data?sslmode=disable"
+	}
+	if c.Database.Port == 0 {
+		c.Database.Port = 5433
+	}
+	if c.Database.MaxConnections == 0 {
+		c.Database.MaxConnections = 10
+	}
+	if c.Database.MinConnections == 0 {
+		c.Database.MinConnections = 2
+	}
+	if c.Database.Timeout == 0 {
+		c.Database.Timeout = 30 * time.Second
+	}
+	if c.Database.SSLMode == "" {
+		c.Database.SSLMode = "disable"
+	}
+	if c.Scheduler.MaxConcurrent == 0 {
+		c.Scheduler.MaxConcurrent = 10
+	}
+	if c.Scheduler.RetryDelay == 0 {
+		c.Scheduler.RetryDelay = time.Minute
+	}
+	if c.Security.MaxPenalty == 0 {
+		c.Security.MaxPenalty = 1
+	}
+	if c.Security.TokenExpiry == 0 {
+		c.Security.TokenExpiry = 24 * time.Hour
+	}
+}
+
 func (c *Config) validateDatabase() error {
 	if c.Database.Type == "" {
 		return fmt.Errorf("database type cannot be empty")
@@ -214,7 +270,10 @@ func (c *Config) validateDatabase() error {
 }
 
 func (c *Config) validateP2P() error {
-	if c.P2P.Port <= 0 || c.P2P.Port > 65535 {
+	if c.P2P.Port == 0 {
+		return fmt.Errorf("p2p port must be positive")
+	}
+	if c.P2P.Port < 0 || c.P2P.Port > 65535 {
 		return fmt.Errorf("invalid port number: %d", c.P2P.Port)
 	}
 
@@ -243,7 +302,10 @@ func (c *Config) validateScripts() error {
 		}
 	}
 
-	if c.Scripts.MaxMemoryMB <= 0 {
+	if c.Scripts.MaxMemoryMB == 0 {
+		c.Scripts.MaxMemoryMB = 512
+	}
+	if c.Scripts.MaxMemoryMB < 0 {
 		return fmt.Errorf("max_memory_mb must be positive")
 	}
 
@@ -263,6 +325,9 @@ func (c *Config) validateScheduler() error {
 }
 
 func (c *Config) validateSecurity() error {
+	if c.Security.MaxPenalty == 0 {
+		c.Security.MaxPenalty = 1
+	}
 	if c.Security.MinReputationScore < 0 || c.Security.MinReputationScore > 1 {
 		return fmt.Errorf("min_reputation_score must be between 0 and 1")
 	}

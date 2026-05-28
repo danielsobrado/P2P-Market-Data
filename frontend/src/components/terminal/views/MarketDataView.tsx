@@ -8,14 +8,14 @@ type MarketTab = 'EOD' | 'DIVIDEND' | 'INSIDER_TRADE' | 'SPLIT'
 
 export function MarketDataView({ data }: { data: TerminalData }) {
   const [tab, setTab] = useState<MarketTab>('EOD')
-  const { eodData, dividendData, insiderData, marketQuery, marketLoading, fetchMarketData, updateMarketQuery, uploadMarketData } = data
+  const { eodData, dividendData, insiderData, splitData, marketQuery, marketLoading, fetchMarketData, updateMarketQuery, uploadMarketData } = data
   const [uploadOpen, setUploadOpen] = useState(false)
 
   const tabs = [
     { id: 'EOD', label: 'End of Day', count: eodData.length },
     { id: 'DIVIDEND', label: 'Dividends', count: dividendData.length },
     { id: 'INSIDER_TRADE', label: 'Insider Trades', count: insiderData.length },
-    { id: 'SPLIT', label: 'Splits', count: 0 },
+    { id: 'SPLIT', label: 'Splits', count: splitData.length },
   ]
 
   const loadData = () => fetchMarketData(marketQuery)
@@ -92,12 +92,10 @@ export function MarketDataView({ data }: { data: TerminalData }) {
             ) : (
               <EmptyState title="No insider trades" hint="No records for this query" />
             )
+          ) : splitData.length > 0 ? (
+            <SplitTable rows={splitData} />
           ) : (
-            <EmptyState
-              icon={<Info size={28} />}
-              title="Split data API unavailable"
-              hint="Backend persistence not yet implemented — tab reserved for future GetSplitData"
-            />
+            <EmptyState icon={<Info size={28} />} title="No split data" hint="No records for this query" />
           )}
         </Panel>
       </div>
@@ -212,6 +210,37 @@ function InsiderTable({ rows }: { rows: TerminalData['insiderData'] }) {
   )
 }
 
+function SplitTable({ rows }: { rows: TerminalData['splitData'] }) {
+  return (
+    <table className="dense-table">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Ex-Date</th>
+          <th className="num">Ratio</th>
+          <th className="num">Old</th>
+          <th className="num">New</th>
+          <th>Status</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={`${r.symbol}-${r.exDate}-${i}`}>
+            <td className="sym">{r.symbol}</td>
+            <td className="dim">{r.exDate}</td>
+            <td className="num bright">{formatNumber(r.ratio)}</td>
+            <td className="num">{r.oldShares}</td>
+            <td className="num">{r.newShares}</td>
+            <td className="dim">{r.status}</td>
+            <td className="dim">{r.source || '-'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 function UploadModal({
   onClose,
   onUpload,
@@ -223,6 +252,10 @@ function UploadModal({
   const [price, setPrice] = useState('150')
   const [volume, setVolume] = useState('1000')
   const [type, setType] = useState('EOD')
+  const [amount, setAmount] = useState('0.25')
+  const [ratio, setRatio] = useState('2')
+  const [oldShares, setOldShares] = useState('1')
+  const [newShares, setNewShares] = useState('2')
   const [loading, setLoading] = useState(false)
 
   return (
@@ -256,17 +289,44 @@ function UploadModal({
               <select value={type} onChange={(e) => setType(e.target.value)}>
                 <option value="EOD">EOD</option>
                 <option value="DIVIDEND">DIVIDEND</option>
+                <option value="SPLIT">SPLIT</option>
               </select>
             </div>
           </div>
-          <div className="field">
-            <label className="lbl">Price</label>
-            <input className="input" value={price} onChange={(e) => setPrice(e.target.value)} />
-          </div>
-          <div className="field">
-            <label className="lbl">Volume</label>
-            <input className="input" value={volume} onChange={(e) => setVolume(e.target.value)} />
-          </div>
+          {type === 'DIVIDEND' ? (
+            <div className="field">
+              <label className="lbl">Amount</label>
+              <input className="input" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </div>
+          ) : type === 'SPLIT' ? (
+            <>
+              <div className="field">
+                <label className="lbl">Ratio</label>
+                <input className="input" value={ratio} onChange={(e) => setRatio(e.target.value)} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div className="field">
+                  <label className="lbl">Old Shares</label>
+                  <input className="input" value={oldShares} onChange={(e) => setOldShares(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label className="lbl">New Shares</label>
+                  <input className="input" value={newShares} onChange={(e) => setNewShares(e.target.value)} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="field">
+                <label className="lbl">Price</label>
+                <input className="input" value={price} onChange={(e) => setPrice(e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="lbl">Volume</label>
+                <input className="input" value={volume} onChange={(e) => setVolume(e.target.value)} />
+              </div>
+            </>
+          )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
             <button className="btn ghost" onClick={onClose}>
               Cancel
@@ -282,6 +342,11 @@ function UploadModal({
                     type,
                     price: parseFloat(price),
                     volume: parseFloat(volume),
+                    amount: parseFloat(amount),
+                    ratio: parseFloat(ratio),
+                    oldShares: parseFloat(oldShares),
+                    newShares: parseFloat(newShares),
+                    exDate: new Date().toISOString().slice(0, 10),
                   })
                 } finally {
                   setLoading(false)

@@ -10,6 +10,7 @@ import (
 
 	"p2p_market_data/pkg/config"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -426,6 +427,10 @@ func (r *PostgresRepository) SaveMarketData(ctx context.Context, data *MarketDat
 			return ErrDuplicate
 		}
 		return fmt.Errorf("inserting market data: %w", err)
+	}
+
+	if err := r.upsertLocalDataSource(ctx, data.Symbol, data.DataType, data.Timestamp); err != nil {
+		return fmt.Errorf("updating data source: %w", err)
 	}
 
 	return nil
@@ -847,6 +852,7 @@ func (r *PostgresRepository) SearchData(ctx context.Context, request DataRequest
 	for _, source := range sources {
 		typeMatch := request.Type == ""
 		symbolMatch := request.Symbol == ""
+		rangeMatch := dataSourceOverlapsRequest(source, request)
 
 		for _, t := range source.DataTypes {
 			if t == request.Type {
@@ -861,12 +867,27 @@ func (r *PostgresRepository) SearchData(ctx context.Context, request DataRequest
 			}
 		}
 
-		if typeMatch && symbolMatch {
+		if typeMatch && symbolMatch && rangeMatch {
 			filtered = append(filtered, source)
 		}
 	}
 
 	return filtered, nil
+}
+
+func dataSourceOverlapsRequest(source DataSource, request DataRequest) bool {
+	if request.StartDate == "" || request.EndDate == "" || source.DataRangeStart.IsZero() || source.DataRangeEnd.IsZero() {
+		return true
+	}
+	start, err := time.Parse("2006-01-02", request.StartDate)
+	if err != nil {
+		return true
+	}
+	end, err := time.Parse("2006-01-02", request.EndDate)
+	if err != nil {
+		return true
+	}
+	return !source.DataRangeEnd.Before(start) && !source.DataRangeStart.After(end)
 }
 
 // GetEODData retrieves end-of-day data based on symbol and date range
@@ -1060,9 +1081,362 @@ func (r *PostgresRepository) SaveDividendData(ctx context.Context, dividend *Div
 	if err != nil {
 		return fmt.Errorf("saving dividend data: %w", err)
 	}
+	if err := r.upsertLocalDataSource(ctx, dividend.Symbol, DataTypeDividend, dividend.ExDate); err != nil {
+		return fmt.Errorf("updating data source: %w", err)
+	}
 	return nil
 }
 
+// SaveSplitData saves split data to the database.
+func (r *PostgresRepository) SaveSplitData(ctx context.Context, split *SplitData) error {
+	if err := split.Validate(); err != nil {
+		return fmt.Errorf("validating split data: %w", err)
+	}
+
+	query := `
+        INSERT INTO splits (
+            id, symbol, split_ratio, announcement_date, ex_date, old_shares,
+            new_shares, status, source, metadata, created_at, updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, $10, NOW(), NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            split_ratio = EXCLUDED.split_ratio,
+            announcement_date = EXCLUDED.announcement_date,
+            ex_date = EXCLUDED.ex_date,
+            old_shares = EXCLUDED.old_shares,
+            new_shares = EXCLUDED.new_shares,
+            status = EXCLUDED.status,
+            source = EXCLUDED.source,
+            metadata = EXCLUDED.metadata,
+            updated_at = NOW()
+    `
+
+	metadataJSON, err := json.Marshal(split.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshaling split metadata: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query,
+		split.ID,
+		split.Symbol,
+		split.SplitRatio,
+		nullableTime(split.AnnouncementDate),
+		split.ExDate,
+		split.OldShares,
+		split.NewShares,
+		split.Status,
+		split.Source,
+		metadataJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("saving split data: %w", err)
+	}
+	if err := r.upsertLocalDataSource(ctx, split.Symbol, DataTypeSplit, split.ExDate); err != nil {
+		return fmt.Errorf("updating data source: %w", err)
+	}
+	return nil
+}
+
+// SaveInsiderData saves insider trade data to the database.
+func (r *PostgresRepository) SaveInsiderData(ctx context.Context, trade *InsiderTrade) error {
+	if trade.ID == "" {
+		trade.ID = uuid.New().String()
+	}
+	if trade.TradeDate.IsZero() {
+		trade.TradeDate = trade.Timestamp
+	}
+	if trade.TradeDate.IsZero() {
+		trade.TradeDate = time.Now().UTC()
+	}
+
+	query := `
+        INSERT INTO insider_trades (
+            id, symbol, trade_date, insider_name, insider_title, transaction_type,
+            shares, price_per_share, value, metadata
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, $10
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            trade_date = EXCLUDED.trade_date,
+            insider_name = EXCLUDED.insider_name,
+            insider_title = EXCLUDED.insider_title,
+            transaction_type = EXCLUDED.transaction_type,
+            shares = EXCLUDED.shares,
+            price_per_share = EXCLUDED.price_per_share,
+            value = EXCLUDED.value,
+            metadata = EXCLUDED.metadata
+    `
+
+	metadataJSON, err := json.Marshal(trade.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshaling insider metadata: %w", err)
+	}
+
+	if _, err := r.pool.Exec(ctx, query,
+		trade.ID,
+		trade.Symbol,
+		trade.TradeDate,
+		trade.InsiderName,
+		trade.InsiderTitle,
+		trade.TransactionType,
+		trade.Shares,
+		trade.PricePerShare,
+		trade.Value,
+		metadataJSON,
+	); err != nil {
+		return fmt.Errorf("saving insider data: %w", err)
+	}
+	return r.upsertLocalDataSource(ctx, trade.Symbol, DataTypeInsiderTrade, trade.TradeDate)
+}
+
+// GetSplitData retrieves split data by symbol and ex-date range.
+func (r *PostgresRepository) GetSplitData(ctx context.Context, symbol, startDate, endDate string) ([]SplitData, error) {
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start date: %w", err)
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end date: %w", err)
+	}
+
+	query := `
+        SELECT id, symbol, split_ratio, announcement_date, ex_date, old_shares,
+               new_shares, status, source, metadata
+        FROM splits
+        WHERE symbol = $1 AND ex_date BETWEEN $2 AND $3
+        ORDER BY ex_date ASC
+    `
+
+	rows, err := r.pool.Query(ctx, query, symbol, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("querying split data: %w", err)
+	}
+	defer rows.Close()
+
+	var splits []SplitData
+	for rows.Next() {
+		var split SplitData
+		var announcementDate *time.Time
+		var metadataJSON []byte
+		if err := rows.Scan(
+			&split.ID,
+			&split.Symbol,
+			&split.SplitRatio,
+			&announcementDate,
+			&split.ExDate,
+			&split.OldShares,
+			&split.NewShares,
+			&split.Status,
+			&split.Source,
+			&metadataJSON,
+		); err != nil {
+			return nil, fmt.Errorf("scanning split data: %w", err)
+		}
+		if announcementDate != nil {
+			split.AnnouncementDate = *announcementDate
+		}
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &split.Metadata); err != nil {
+				return nil, fmt.Errorf("unmarshaling split metadata: %w", err)
+			}
+		}
+		split.DataType = DataTypeSplit
+		splits = append(splits, split)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating split data: %w", err)
+	}
+	return splits, nil
+}
+
+// SaveTransfer persists transfer state for the UI transfer queue.
+func (r *PostgresRepository) SaveTransfer(ctx context.Context, transfer *DataTransfer) error {
+	if transfer.ID == "" {
+		transfer.ID = uuid.New().String()
+	}
+	if transfer.StartTime.IsZero() {
+		transfer.StartTime = time.Now().UTC()
+	}
+	if transfer.Status == "" {
+		transfer.Status = "pending"
+	}
+	if transfer.Source == "" {
+		transfer.Source = "local"
+	}
+	if transfer.Destination == "" {
+		transfer.Destination = "unknown"
+	}
+
+	if err := r.ensureTransferPeer(ctx, transfer.Source); err != nil {
+		return err
+	}
+	if err := r.ensureTransferPeer(ctx, transfer.Destination); err != nil {
+		return err
+	}
+
+	query := `
+        INSERT INTO transfers (
+            id, source_peer_id, target_peer_id, data_type, symbol, start_time,
+            end_time, status, progress, size_bytes, speed_bps, error_message
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, $10, $11, $12
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            status = EXCLUDED.status,
+            progress = EXCLUDED.progress,
+            end_time = EXCLUDED.end_time,
+            size_bytes = EXCLUDED.size_bytes,
+            speed_bps = EXCLUDED.speed_bps,
+            error_message = EXCLUDED.error_message,
+            updated_at = NOW()
+    `
+
+	_, err := r.pool.Exec(ctx, query,
+		transfer.ID,
+		transfer.Source,
+		transfer.Destination,
+		transfer.Type,
+		transfer.Symbol,
+		transfer.StartTime,
+		nullableTime(transfer.EndTime),
+		transfer.Status,
+		transfer.Progress,
+		transfer.Size,
+		transfer.Speed,
+		nullableString(transfer.Error),
+	)
+	if err != nil {
+		return fmt.Errorf("saving transfer: %w", err)
+	}
+	return nil
+}
+
+// ListTransfers returns transfer state ordered by newest first.
+func (r *PostgresRepository) ListTransfers(ctx context.Context) ([]DataTransfer, error) {
+	query := `
+        SELECT id, source_peer_id, target_peer_id, data_type, symbol, start_time,
+               end_time, status, progress, size_bytes, speed_bps, error_message
+        FROM transfers
+        ORDER BY start_time DESC
+        LIMIT 200
+    `
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("querying transfers: %w", err)
+	}
+	defer rows.Close()
+
+	transfers := make([]DataTransfer, 0)
+	for rows.Next() {
+		var transfer DataTransfer
+		var endTime *time.Time
+		var errorMessage *string
+		if err := rows.Scan(
+			&transfer.ID,
+			&transfer.Source,
+			&transfer.Destination,
+			&transfer.Type,
+			&transfer.Symbol,
+			&transfer.StartTime,
+			&endTime,
+			&transfer.Status,
+			&transfer.Progress,
+			&transfer.Size,
+			&transfer.Speed,
+			&errorMessage,
+		); err != nil {
+			return nil, fmt.Errorf("scanning transfer: %w", err)
+		}
+		if endTime != nil {
+			transfer.EndTime = *endTime
+		}
+		if errorMessage != nil {
+			transfer.Error = *errorMessage
+		}
+		transfers = append(transfers, transfer)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating transfers: %w", err)
+	}
+	return transfers, nil
+}
+
+func (r *PostgresRepository) upsertLocalDataSource(ctx context.Context, symbol, dataType string, observedAt time.Time) error {
+	if symbol == "" || dataType == "" {
+		return nil
+	}
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+
+	query := `
+        INSERT INTO data_sources (
+            peer_id, reputation, data_types, available_symbols,
+            data_range_start, data_range_end, last_update, reliability
+        ) VALUES (
+            'local', 1, ARRAY[$1]::TEXT[], ARRAY[$2]::TEXT[],
+            $3, $3, $3, 1
+        )
+        ON CONFLICT (peer_id) DO UPDATE SET
+            data_types = (
+                SELECT ARRAY(SELECT DISTINCT unnest(data_sources.data_types || EXCLUDED.data_types))
+            ),
+            available_symbols = (
+                SELECT ARRAY(SELECT DISTINCT unnest(data_sources.available_symbols || EXCLUDED.available_symbols))
+            ),
+            data_range_start = LEAST(COALESCE(data_sources.data_range_start, EXCLUDED.data_range_start), EXCLUDED.data_range_start),
+            data_range_end = GREATEST(COALESCE(data_sources.data_range_end, EXCLUDED.data_range_end), EXCLUDED.data_range_end),
+            last_update = GREATEST(data_sources.last_update, EXCLUDED.last_update),
+            updated_at = NOW()
+    `
+	if _, err := r.pool.Exec(ctx, query, dataType, symbol, observedAt); err != nil {
+		if isPgUndefinedTableError(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *PostgresRepository) ensureTransferPeer(ctx context.Context, peerID string) error {
+	if peerID == "" {
+		return nil
+	}
+	query := `
+        INSERT INTO peers (id, address, reputation, last_seen, roles, metadata)
+        VALUES ($1, $2, 1, NOW(), ARRAY['transfer'], '{"status":"connected"}'::jsonb)
+        ON CONFLICT (id) DO NOTHING
+    `
+	if _, err := r.pool.Exec(ctx, query, peerID, peerID); err != nil {
+		return fmt.Errorf("ensuring transfer peer %q: %w", peerID, err)
+	}
+	return nil
+}
+
+func nullableTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	return &value
+}
+
+func nullableString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func isPgUndefinedTableError(err error) bool {
+	pgErr, ok := err.(*pgconn.PgError)
+	return ok && pgErr.Code == "42P01"
+}
 
 func parseFloat(value string) float64 {
 	if value == "" {

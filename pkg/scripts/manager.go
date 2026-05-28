@@ -376,7 +376,7 @@ func (m *ScriptManager) BackupScript(scriptID string) error {
 
 	sourcePath := filepath.Join(m.Config.ScriptDir, script.Name)
 	backupPath := filepath.Join(m.Config.ScriptDir, "backups",
-		fmt.Sprintf("%s_%s.py", script.ID, time.Now().Format("20060102_150405")))
+		fmt.Sprintf("%s_%s.py", script.ID, time.Now().Format("20060102_150405.000000000")))
 
 	if err := os.MkdirAll(filepath.Dir(backupPath), 0755); err != nil {
 		return fmt.Errorf("creating backup directory: %w", err)

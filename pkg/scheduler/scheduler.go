@@ -44,6 +44,7 @@ type Task struct {
 // Scheduler manages task scheduling and execution
 type Scheduler struct {
 	cron       *cron.Cron
+	parser     cron.Parser
 	scriptMgr  *scripts.ScriptManager
 	tasks      map[string]*Task
 	config     *config.SchedConfig
@@ -69,9 +70,11 @@ type SchedulerMetrics struct {
 // NewScheduler creates a new scheduler instance
 func NewScheduler(scriptMgr *scripts.ScriptManager, config *config.SchedConfig, logger *zap.Logger) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
+	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
 	return &Scheduler{
-		cron:       cron.New(cron.WithSeconds()),
+		cron:       cron.New(cron.WithParser(parser)),
+		parser:     parser,
 		scriptMgr:  scriptMgr,
 		tasks:      make(map[string]*Task),
 		config:     config,
@@ -129,6 +132,9 @@ func (s *Scheduler) ScheduleTask(task *Task) error {
 
 	// Create cron schedule
 	cronID, err := s.cron.AddFunc(task.Schedule, func() {
+		if !s.shouldRunTask(task) {
+			return
+		}
 		s.executeTask(s.ctx, task)
 	})
 	if err != nil {
@@ -214,7 +220,9 @@ func (s *Scheduler) executeTask(ctx context.Context, task *Task) {
 	start := time.Now()
 
 	s.mu.Lock()
-	task.Status = TaskStatusRunning
+	if task.Status != TaskStatusComplete {
+		task.Status = TaskStatusRunning
+	}
 	task.LastRun = start
 	s.mu.Unlock()
 
@@ -238,15 +246,24 @@ func (s *Scheduler) executeTask(ctx context.Context, task *Task) {
 	task.NextRun = s.cron.Entry(task.CronID).Next
 	s.mu.Unlock()
 
+	duration := time.Since(start)
+	if duration <= 0 {
+		duration = time.Nanosecond
+	}
+
 	// Update metrics
 	s.metrics.mu.Lock()
-	s.metrics.AverageLatency = (s.metrics.AverageLatency*9 + time.Since(start)) / 10
+	if s.metrics.AverageLatency == 0 {
+		s.metrics.AverageLatency = duration
+	} else {
+		s.metrics.AverageLatency = (s.metrics.AverageLatency*9 + duration) / 10
+	}
 	s.metrics.LastUpdate = time.Now()
 	s.metrics.mu.Unlock()
 
 	s.logger.Info("Task execution completed",
 		zap.String("taskID", task.ID),
-		zap.Duration("duration", time.Since(start)),
+		zap.Duration("duration", duration),
 		zap.Error(err))
 }
 
@@ -264,9 +281,13 @@ func (s *Scheduler) runTaskWithRetries(ctx context.Context, task *Task) error {
 		}
 
 		// Execute task function
-		if err := task.ExecutionFn(ctx); err != nil {
+		if err := runExecutionFn(ctx, task.ExecutionFn); err != nil {
 			lastErr = err
-			task.RetryCount = attempt
+			if attempt < task.MaxRetries {
+				task.RetryCount = attempt + 1
+			} else {
+				task.RetryCount = task.MaxRetries
+			}
 			s.logger.Warn("Task execution failed",
 				zap.String("taskID", task.ID),
 				zap.Int("attempt", attempt+1),
@@ -278,6 +299,25 @@ func (s *Scheduler) runTaskWithRetries(ctx context.Context, task *Task) error {
 	}
 
 	return fmt.Errorf("task failed after %d retries: %w", task.MaxRetries, lastErr)
+}
+
+func runExecutionFn(ctx context.Context, fn func(context.Context) error) (err error) {
+	result := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result <- fmt.Errorf("task panic: %v", r)
+			}
+		}()
+		result <- fn(ctx)
+	}()
+
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Scheduler) validateTask(task *Task) error {
@@ -292,7 +332,7 @@ func (s *Scheduler) validateTask(task *Task) error {
 	}
 
 	// Validate cron schedule
-	if _, err := cron.ParseStandard(task.Schedule); err != nil {
+	if _, err := s.parser.Parse(task.Schedule); err != nil {
 		return fmt.Errorf("invalid cron schedule: %w", err)
 	}
 
@@ -341,7 +381,7 @@ func (s *Scheduler) UpdateTaskSchedule(taskID string, schedule string) error {
 	}
 
 	// Validate new schedule
-	if _, err := cron.ParseStandard(schedule); err != nil {
+	if _, err := s.parser.Parse(schedule); err != nil {
 		return fmt.Errorf("invalid cron schedule: %w", err)
 	}
 
@@ -350,6 +390,9 @@ func (s *Scheduler) UpdateTaskSchedule(taskID string, schedule string) error {
 
 	// Add new schedule
 	cronID, err := s.cron.AddFunc(schedule, func() {
+		if !s.shouldRunTask(task) {
+			return
+		}
 		s.executeTask(s.ctx, task)
 	})
 	if err != nil {
@@ -366,6 +409,14 @@ func (s *Scheduler) UpdateTaskSchedule(taskID string, schedule string) error {
 		zap.Time("nextRun", task.NextRun))
 
 	return nil
+}
+
+func (s *Scheduler) shouldRunTask(task *Task) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return task.Status != TaskStatusRunning &&
+		task.Status != TaskStatusFailed &&
+		task.Status != TaskStatusCancelled
 }
 
 // GetSchedulerStats returns current scheduler statistics

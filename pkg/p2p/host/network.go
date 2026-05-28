@@ -1,7 +1,9 @@
 package host
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"p2p_market_data/pkg/data"
 	"sync"
@@ -10,6 +12,14 @@ import (
 	libp2pPeer "github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap"
 )
+
+type splitWriter interface {
+	SaveSplitData(context.Context, *data.SplitData) error
+}
+
+type insiderWriter interface {
+	SaveInsiderData(context.Context, *data.InsiderTrade) error
+}
 
 // DataRequest represents a data request to a peer
 type DataRequest struct {
@@ -149,10 +159,180 @@ func (nm *NetworkManager) RequestData(ctx context.Context, peerID string, reques
 		return fmt.Errorf("peer %s is not connected", peerID)
 	}
 
+	stream, err := nm.host.host.NewStream(ctx, id, ProtocolID)
+	if err != nil {
+		return fmt.Errorf("opening data request stream: %w", err)
+	}
+	defer stream.Close()
+
+	writer := bufio.NewWriter(stream)
+	if err := json.NewEncoder(writer).Encode(request); err != nil {
+		return fmt.Errorf("encoding data request: %w", err)
+	}
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("flushing data request: %w", err)
+	}
+
+	var resp dataResponse
+	if err := json.NewDecoder(bufio.NewReader(stream)).Decode(&resp); err != nil {
+		return fmt.Errorf("decoding data response: %w", err)
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("remote data request failed: %s", resp.Error)
+	}
+	if err := nm.persistDataResponse(ctx, peerID, resp); err != nil {
+		return err
+	}
+
 	nm.logger.Info("Data request queued",
 		zap.String("peerID", peerID),
 		zap.String("type", request.Type),
 		zap.String("symbol", request.Symbol))
+	return nil
+}
+
+func (nm *NetworkManager) persistDataResponse(ctx context.Context, peerID string, resp dataResponse) error {
+	switch resp.Type {
+	case data.DataTypeEOD:
+		for _, row := range resp.EOD {
+			if err := validateEODResponse(row); err != nil {
+				return err
+			}
+			price := row.Close
+			if price <= 0 {
+				price = 1
+			}
+			volume := row.Volume
+			if volume < 0 {
+				volume = 0
+			}
+			item, err := data.NewMarketData(row.Symbol, price, volume, peerID, data.DataTypeEOD)
+			if err != nil {
+				return err
+			}
+			item.Timestamp = row.Date
+			if item.Timestamp.IsZero() {
+				item.Timestamp = row.Timestamp
+			}
+			item.MetaData["open"] = fmt.Sprintf("%f", row.Open)
+			item.MetaData["high"] = fmt.Sprintf("%f", row.High)
+			item.MetaData["low"] = fmt.Sprintf("%f", row.Low)
+			item.MetaData["close"] = fmt.Sprintf("%f", row.Close)
+			item.MetaData["adjusted_close"] = fmt.Sprintf("%f", row.AdjustedClose)
+			item.MetaData["volume"] = fmt.Sprintf("%f", row.Volume)
+			item.UpdateHash()
+			if err := nm.host.repo.SaveMarketData(ctx, item); err != nil && err != data.ErrDuplicate {
+				return err
+			}
+		}
+	case data.DataTypeDividend:
+		for _, row := range resp.Dividends {
+			if err := validateDividendResponse(row); err != nil {
+				return err
+			}
+			if row.Source == "" {
+				row.Source = peerID
+			}
+			if err := nm.host.repo.SaveDividendData(ctx, row); err != nil && err != data.ErrDuplicate {
+				return err
+			}
+		}
+	case data.DataTypeInsiderTrade:
+		repo, ok := nm.host.repo.(insiderWriter)
+		if !ok {
+			return fmt.Errorf("insider repository not available")
+		}
+		for _, row := range resp.Insiders {
+			if err := validateInsiderResponse(row); err != nil {
+				return err
+			}
+			if row.Source == "" {
+				row.Source = peerID
+			}
+			if err := repo.SaveInsiderData(ctx, &row); err != nil && err != data.ErrDuplicate {
+				return err
+			}
+		}
+	case data.DataTypeSplit:
+		repo, ok := nm.host.repo.(splitWriter)
+		if !ok {
+			return fmt.Errorf("split repository not available")
+		}
+		for _, row := range resp.Splits {
+			if err := validateSplitResponse(row); err != nil {
+				return err
+			}
+			if row.Source == "" {
+				row.Source = peerID
+			}
+			if err := repo.SaveSplitData(ctx, &row); err != nil && err != data.ErrDuplicate {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported response type: %s", resp.Type)
+	}
+	return nil
+}
+
+func validateEODResponse(row data.EODData) error {
+	if row.Symbol == "" {
+		return fmt.Errorf("invalid EOD response row: symbol is required")
+	}
+	if row.Date.IsZero() && row.Timestamp.IsZero() {
+		return fmt.Errorf("invalid EOD response row for %s: date is required", row.Symbol)
+	}
+	if row.Close <= 0 {
+		return fmt.Errorf("invalid EOD response row for %s: close must be positive", row.Symbol)
+	}
+	if row.Volume < 0 {
+		return fmt.Errorf("invalid EOD response row for %s: volume cannot be negative", row.Symbol)
+	}
+	return nil
+}
+
+func validateDividendResponse(row *data.DividendData) error {
+	if row == nil {
+		return fmt.Errorf("invalid dividend response row: row is nil")
+	}
+	if row.Symbol == "" {
+		return fmt.Errorf("invalid dividend response row: symbol is required")
+	}
+	if row.ExDate.IsZero() {
+		return fmt.Errorf("invalid dividend response row for %s: ex-date is required", row.Symbol)
+	}
+	if row.Amount <= 0 {
+		return fmt.Errorf("invalid dividend response row for %s: amount must be positive", row.Symbol)
+	}
+	return nil
+}
+
+func validateInsiderResponse(row data.InsiderTrade) error {
+	if row.Symbol == "" {
+		return fmt.Errorf("invalid insider response row: symbol is required")
+	}
+	if row.TradeDate.IsZero() {
+		return fmt.Errorf("invalid insider response row for %s: trade date is required", row.Symbol)
+	}
+	if row.Shares <= 0 {
+		return fmt.Errorf("invalid insider response row for %s: shares must be positive", row.Symbol)
+	}
+	return nil
+}
+
+func validateSplitResponse(row data.SplitData) error {
+	if row.Symbol == "" {
+		return fmt.Errorf("invalid split response row: symbol is required")
+	}
+	if row.ExDate.IsZero() {
+		return fmt.Errorf("invalid split response row for %s: ex-date is required", row.Symbol)
+	}
+	if row.SplitRatio <= 0 {
+		return fmt.Errorf("invalid split response row for %s: split ratio must be positive", row.Symbol)
+	}
+	if row.OldShares <= 0 || row.NewShares <= 0 {
+		return fmt.Errorf("invalid split response row for %s: share counts must be positive", row.Symbol)
+	}
 	return nil
 }
 

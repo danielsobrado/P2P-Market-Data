@@ -16,6 +16,9 @@ type MemoryRepository struct {
 	peers      map[string]*Peer
 	stakes     map[string]*Stake
 	dividends  map[string]*DividendData
+	insiders   map[string]*InsiderTrade
+	splits     map[string]*SplitData
+	transfers  map[string]*DataTransfer
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -25,6 +28,9 @@ func NewMemoryRepository() *MemoryRepository {
 		peers:      make(map[string]*Peer),
 		stakes:     make(map[string]*Stake),
 		dividends:  make(map[string]*DividendData),
+		insiders:   make(map[string]*InsiderTrade),
+		splits:     make(map[string]*SplitData),
+		transfers:  make(map[string]*DataTransfer),
 	}
 }
 
@@ -321,7 +327,28 @@ func (r *MemoryRepository) GetEODData(ctx context.Context, symbol, startDate, en
 }
 
 func (r *MemoryRepository) GetInsiderData(ctx context.Context, symbol, startDate, endDate string) ([]InsiderTrade, error) {
-	return []InsiderTrade{}, nil
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return nil, err
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	insiders := make([]InsiderTrade, 0)
+	for _, item := range r.insiders {
+		if item.Symbol != symbol {
+			continue
+		}
+		if item.TradeDate.Before(start) || item.TradeDate.After(end) {
+			continue
+		}
+		copyTrade := *item
+		insiders = append(insiders, copyTrade)
+	}
+	return insiders, nil
 }
 
 func (r *MemoryRepository) GetDataSources(ctx context.Context) ([]DataSource, error) {
@@ -342,7 +369,37 @@ func (r *MemoryRepository) GetDataSources(ctx context.Context) ([]DataSource, er
 			end = item.Timestamp
 		}
 	}
-	if len(r.marketData) == 0 {
+	for _, item := range r.dividends {
+		symbols[item.Symbol] = struct{}{}
+		dataTypes[DataTypeDividend] = struct{}{}
+		if start.IsZero() || item.ExDate.Before(start) {
+			start = item.ExDate
+		}
+		if end.IsZero() || item.ExDate.After(end) {
+			end = item.ExDate
+		}
+	}
+	for _, item := range r.insiders {
+		symbols[item.Symbol] = struct{}{}
+		dataTypes[DataTypeInsiderTrade] = struct{}{}
+		if start.IsZero() || item.TradeDate.Before(start) {
+			start = item.TradeDate
+		}
+		if end.IsZero() || item.TradeDate.After(end) {
+			end = item.TradeDate
+		}
+	}
+	for _, item := range r.splits {
+		symbols[item.Symbol] = struct{}{}
+		dataTypes[DataTypeSplit] = struct{}{}
+		if start.IsZero() || item.ExDate.Before(start) {
+			start = item.ExDate
+		}
+		if end.IsZero() || item.ExDate.After(end) {
+			end = item.ExDate
+		}
+	}
+	if len(symbols) == 0 {
 		return []DataSource{}, nil
 	}
 
@@ -381,7 +438,7 @@ func (r *MemoryRepository) SearchData(ctx context.Context, request DataRequest) 
 				break
 			}
 		}
-		if typeMatch && symbolMatch {
+		if typeMatch && symbolMatch && dataSourceOverlapsRequest(source, request) {
 			filtered = append(filtered, source)
 		}
 	}
@@ -407,13 +464,79 @@ func (r *MemoryRepository) GetDividendData(ctx context.Context, symbol string, s
 		if dividend.Symbol != symbol {
 			continue
 		}
-		if dividend.Timestamp.Before(startDate) || dividend.Timestamp.After(endDate) {
+		if dividend.ExDate.Before(startDate) || dividend.ExDate.After(endDate) {
 			continue
 		}
 		copyDividend := *dividend
 		dividends = append(dividends, &copyDividend)
 	}
 	return dividends, nil
+}
+
+func (r *MemoryRepository) SaveSplitData(ctx context.Context, split *SplitData) error {
+	if err := split.Validate(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copySplit := *split
+	r.splits[split.ID] = &copySplit
+	return nil
+}
+
+func (r *MemoryRepository) SaveInsiderData(ctx context.Context, trade *InsiderTrade) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copyTrade := *trade
+	r.insiders[trade.ID] = &copyTrade
+	return nil
+}
+
+func (r *MemoryRepository) GetSplitData(ctx context.Context, symbol, startDate, endDate string) ([]SplitData, error) {
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return nil, err
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	splits := make([]SplitData, 0)
+	for _, split := range r.splits {
+		if split.Symbol != symbol {
+			continue
+		}
+		if split.ExDate.Before(start) || split.ExDate.After(end) {
+			continue
+		}
+		copySplit := *split
+		splits = append(splits, copySplit)
+	}
+	return splits, nil
+}
+
+func (r *MemoryRepository) SaveTransfer(ctx context.Context, transfer *DataTransfer) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copyTransfer := *transfer
+	r.transfers[transfer.ID] = &copyTransfer
+	return nil
+}
+
+func (r *MemoryRepository) ListTransfers(ctx context.Context) ([]DataTransfer, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	transfers := make([]DataTransfer, 0, len(r.transfers))
+	for _, transfer := range r.transfers {
+		copyTransfer := *transfer
+		transfers = append(transfers, copyTransfer)
+	}
+	sort.Slice(transfers, func(i, j int) bool {
+		return transfers[i].StartTime.After(transfers[j].StartTime)
+	})
+	return transfers, nil
 }
 
 func keys(values map[string]struct{}) []string {

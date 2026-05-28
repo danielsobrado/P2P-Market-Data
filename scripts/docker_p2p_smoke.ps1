@@ -23,7 +23,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "go build failed"
 }
 
-docker compose -f $composeFile up -d --build
+docker compose -f $composeFile down --volumes --remove-orphans
+if ($LASTEXITCODE -ne 0) {
+    throw "docker compose cleanup failed. Is Docker Desktop running?"
+}
+
+docker compose -f $composeFile up -d --build --force-recreate
 if ($LASTEXITCODE -ne 0) {
     throw "docker compose failed. Is Docker Desktop running?"
 }
@@ -67,12 +72,30 @@ Invoke-RestMethod `
     -ContentType "application/json" `
     -Body $payload | Out-Null
 
+$requestPayload = @{
+    peer_id = $node1.peer_id
+    type = "EOD"
+    symbol = "BTCUSD"
+    start_date = (Get-Date).AddDays(-1).ToUniversalTime().ToString("yyyy-MM-dd")
+    end_date = (Get-Date).AddDays(1).ToUniversalTime().ToString("yyyy-MM-dd")
+    granularity = "DAILY"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Uri "http://localhost:18081/request-data" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body $requestPayload | Out-Null
+
 $deadline = (Get-Date).AddSeconds(30)
 do {
     $records = Invoke-RestMethod -Uri "http://localhost:18081/market-data?symbol=BTCUSD" -TimeoutSec 3
     if ($records.Count -gt 0) {
         Write-Host "P2P Docker smoke test passed. Node 2 received $($records.Count) BTCUSD record(s)."
         $records | ConvertTo-Json -Depth 8
+        if ($env:KEEP_P2P_SMOKE -ne "1") {
+            docker compose -f $composeFile down --volumes --remove-orphans | Out-Host
+        }
         exit 0
     }
     Start-Sleep -Seconds 1

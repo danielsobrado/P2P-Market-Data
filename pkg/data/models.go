@@ -74,6 +74,22 @@ type DataRequest struct {
 	Granularity string `json:"granularity"`
 }
 
+// DataTransfer represents a data transfer tracked for the UI and API.
+type DataTransfer struct {
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	Symbol      string    `json:"symbol"`
+	Source      string    `json:"source"`
+	Destination string    `json:"destination"`
+	Progress    float64   `json:"progress"`
+	Status      string    `json:"status"`
+	StartTime   time.Time `json:"start_time"`
+	EndTime     time.Time `json:"end_time,omitempty"`
+	Size        int64     `json:"size"`
+	Speed       float64   `json:"speed"`
+	Error       string    `json:"error,omitempty"`
+}
+
 // NewMarketData creates a new MarketData instance with validation
 func NewMarketData(symbol string, price float64, volume float64, source string, dataType string) (*MarketData, error) {
 	if symbol == "" {
@@ -465,7 +481,9 @@ func NewSplitData(
 		ID:        uuid.New().String(),
 		Symbol:    symbol,
 		Timestamp: time.Now().UTC(),
+		Source:    "manual",
 		DataType:  DataTypeSplit,
+		Metadata:  map[string]string{},
 	}
 
 	split := &SplitData{
@@ -487,9 +505,10 @@ func NewSplitData(
 // Implement GetDataSources in PostgresRepository
 func (r *PostgresRepository) GetDataSources(ctx context.Context) ([]DataSource, error) {
 	query := `
-        SELECT peer_id, reputation, data_types, available_symbols, 
+        SELECT peer_id, reputation, data_types, available_symbols,
                data_range_start, data_range_end, last_update, reliability
-        FROM data_sources`
+        FROM data_sources
+        ORDER BY reputation DESC, last_update DESC`
 
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
@@ -500,12 +519,23 @@ func (r *PostgresRepository) GetDataSources(ctx context.Context) ([]DataSource, 
 	var sources []DataSource
 	for rows.Next() {
 		var s DataSource
+		var start, end *time.Time
 		err := rows.Scan(&s.PeerID, &s.Reputation, &s.DataTypes, &s.AvailableSymbols,
-			&s.DataRangeStart, &s.DataRangeEnd, &s.LastUpdate, &s.Reliability)
+			&start, &end, &s.LastUpdate, &s.Reliability)
 		if err != nil {
 			return nil, fmt.Errorf("scanning data source: %w", err)
 		}
+		s.ID = s.PeerID
+		if start != nil {
+			s.DataRangeStart = *start
+		}
+		if end != nil {
+			s.DataRangeEnd = *end
+		}
 		sources = append(sources, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating data sources: %w", err)
 	}
 
 	return sources, nil

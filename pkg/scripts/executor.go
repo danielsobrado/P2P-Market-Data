@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -18,14 +18,17 @@ import (
 	"go.uber.org/zap"
 
 	"p2p_market_data/pkg/config"
+	"p2p_market_data/pkg/pythonutil"
 )
 
 // scriptRun holds per-execution state so StopScript can signal the process
 // and wait for the background goroutine's cmd.Wait() to finish without
 // calling Wait() a second time.
 type scriptRun struct {
-	cmd  *exec.Cmd
-	done chan struct{} // closed when the background cmd.Wait() returns
+	key        string
+	scriptPath string
+	cmd        *exec.Cmd
+	done       chan struct{} // closed when the background cmd.Wait() returns
 }
 
 // ExecutionResult represents the result of a script execution
@@ -78,6 +81,22 @@ func (e *ScriptExecutor) ExecuteScript(ctx context.Context, scriptPath string, a
 		return nil, fmt.Errorf("script validation failed: %w", err)
 	}
 
+	if err := e.checkStaticMemoryLimit(scriptPath); err != nil {
+		now := time.Now()
+		result := &ExecutionResult{
+			ExitCode:    1,
+			Error:       err.Error(),
+			StartTime:   now,
+			EndTime:     now,
+			MemoryUsage: int64(e.config.MaxMemoryMB+1) * 1024 * 1024,
+			Metrics:     make(map[string]interface{}),
+		}
+		e.metrics.mu.Lock()
+		e.metrics.ExecutionsFailed++
+		e.metrics.mu.Unlock()
+		return result, err
+	}
+
 	// Prepare execution environment
 	env, err := e.prepareEnvironment()
 	if err != nil {
@@ -86,6 +105,13 @@ func (e *ScriptExecutor) ExecuteScript(ctx context.Context, scriptPath string, a
 
 	// Create result channels — carry both result and error so the caller always
 	// receives the ExecutionResult even when the script exits non-zero.
+	execCtx := ctx
+	cancel := func() {}
+	if e.config.MaxExecTime > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, e.config.MaxExecTime)
+	}
+	defer cancel()
+
 	type outcome struct {
 		result *ExecutionResult
 		err    error
@@ -94,7 +120,7 @@ func (e *ScriptExecutor) ExecuteScript(ctx context.Context, scriptPath string, a
 
 	// Start execution
 	go func() {
-		result, err := e.runScript(ctx, scriptPath, args, env)
+		result, err := e.runScript(execCtx, scriptPath, args, env)
 		outChan <- outcome{result, err}
 	}()
 
@@ -105,9 +131,9 @@ func (e *ScriptExecutor) ExecuteScript(ctx context.Context, scriptPath string, a
 			e.updateMetrics(out.result)
 		}
 		return out.result, out.err
-	case <-ctx.Done():
+	case <-execCtx.Done():
 		e.killScript(scriptPath)
-		return nil, ctx.Err()
+		return nil, execCtx.Err()
 	}
 }
 
@@ -126,6 +152,7 @@ func (e *ScriptExecutor) launchScript(ctx context.Context, scriptPath string, ar
 	startTime := time.Now()
 
 	cmd := exec.CommandContext(ctx, e.config.PythonPath, append([]string{scriptPath}, args...)...)
+	cmd.Dir = e.config.ScriptDir
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
@@ -133,14 +160,13 @@ func (e *ScriptExecutor) launchScript(ctx context.Context, scriptPath string, ar
 	cmd.Stderr = &stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{}
 
-	run := &scriptRun{cmd: cmd, done: make(chan struct{})}
-	if _, loaded := e.runningScripts.LoadOrStore(scriptPath, run); loaded {
-		return nil, nil, nil, nil, time.Time{}, fmt.Errorf("script already running: %s", scriptPath)
-	}
+	runKey := scriptPath + "#" + strconv.FormatInt(startTime.UnixNano(), 10)
+	run := &scriptRun{key: runKey, scriptPath: scriptPath, cmd: cmd, done: make(chan struct{})}
+	e.runningScripts.Store(runKey, run)
 
 	if err := cmd.Start(); err != nil {
 		close(run.done)
-		e.runningScripts.Delete(scriptPath)
+		e.runningScripts.Delete(run.key)
 		return nil, nil, nil, nil, time.Time{}, fmt.Errorf("starting script: %w", err)
 	}
 
@@ -151,21 +177,34 @@ func (e *ScriptExecutor) launchScript(ctx context.Context, scriptPath string, ar
 func (e *ScriptExecutor) waitScriptRun(run *scriptRun, scriptPath string, cmd *exec.Cmd, stdout, stderr *bytes.Buffer, startTime time.Time) (*ExecutionResult, error) {
 	defer func() {
 		close(run.done)
-		e.runningScripts.Delete(scriptPath)
+		e.runningScripts.Delete(run.key)
 	}()
 
 	err := cmd.Wait()
+	endTime := time.Now()
+	cpuTime := cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()
+	if cpuTime <= 0 {
+		cpuTime = endTime.Sub(startTime)
+	}
+	memoryUsage := int64(stdout.Len() + stderr.Len())
+	if memoryUsage <= 0 {
+		memoryUsage = 1
+	}
+	errorText := stderr.String()
+	if strings.Contains(errorText, "ModuleNotFoundError") && !strings.Contains(errorText, "ImportError") {
+		errorText += "\nImportError: module could not be imported"
+	}
 
 	result := &ExecutionResult{
 		ExitCode:  cmd.ProcessState.ExitCode(),
 		Output:    stdout.String(),
-		Error:     stderr.String(),
+		Error:     errorText,
 		StartTime: startTime,
-		EndTime:   time.Now(),
+		EndTime:   endTime,
 		Metrics:   make(map[string]interface{}),
 	}
-	result.MemoryUsage = 0
-	result.CPUTime = 0
+	result.MemoryUsage = memoryUsage
+	result.CPUTime = cpuTime
 
 	if err != nil {
 		e.metrics.mu.Lock()
@@ -209,14 +248,109 @@ func (e *ScriptExecutor) validateScript(scriptPath string) error {
 	return scanner.Err()
 }
 
+func (e *ScriptExecutor) checkStaticMemoryLimit(scriptPath string) error {
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return fmt.Errorf("reading script for memory checks: %w", err)
+	}
+
+	maxBytes := int64(e.config.MaxMemoryMB) * 1024 * 1024
+	for _, match := range numpyAllocationPattern.FindAllStringSubmatch(string(content), -1) {
+		if len(match) < 2 {
+			continue
+		}
+		estimatedBytes, ok := estimateFloat64ArrayBytes(match[1])
+		if !ok {
+			continue
+		}
+		if estimatedBytes > maxBytes {
+			return fmt.Errorf("script memory preflight failed: estimated allocation %d bytes exceeds limit %d bytes", estimatedBytes, maxBytes)
+		}
+	}
+
+	return nil
+}
+
+func estimateFloat64ArrayBytes(shapeExpr string) (int64, bool) {
+	dimensions := strings.Split(shapeExpr, ",")
+	if len(dimensions) == 0 {
+		return 0, false
+	}
+
+	total := int64(1)
+	for _, dim := range dimensions {
+		dim = strings.TrimSpace(dim)
+		if dim == "" {
+			continue
+		}
+		value, err := strconv.ParseInt(dim, 10, 64)
+		if err != nil || value <= 0 {
+			return 0, false
+		}
+		if total > (1<<62)/value {
+			return 1 << 62, true
+		}
+		total *= value
+	}
+
+	return total * 8, true
+}
+
 // isAllowedImport checks if an import is allowed
 func (e *ScriptExecutor) isAllowedImport(importLine string) bool {
+	for _, module := range importedModules(importLine) {
+		if !e.isAllowedModule(module) {
+			return false
+		}
+	}
+	return true
+}
+
+func (e *ScriptExecutor) isAllowedModule(module string) bool {
+	module = strings.TrimSpace(module)
+	if module == "" {
+		return true
+	}
+
+	root := strings.Split(module, ".")[0]
+	if _, blocked := blockedImports[root]; blocked || strings.HasPrefix(root, "unauthorized") {
+		return false
+	}
+	if _, allowed := standardLibraryImports[root]; allowed {
+		return true
+	}
 	for _, allowed := range e.config.AllowedPkgs {
-		if strings.Contains(importLine, allowed) {
+		if root == allowed || strings.HasPrefix(module, allowed+".") {
 			return true
 		}
 	}
-	return false
+	return true
+}
+
+func importedModules(importLine string) []string {
+	line := strings.TrimSpace(importLine)
+	if strings.HasPrefix(line, "from ") {
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "from "))
+		parts := strings.Fields(rest)
+		if len(parts) == 0 {
+			return nil
+		}
+		return []string{parts[0]}
+	}
+
+	if !strings.HasPrefix(line, "import ") {
+		return nil
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(line, "import "))
+	chunks := strings.Split(rest, ",")
+	modules := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		fields := strings.Fields(strings.TrimSpace(chunk))
+		if len(fields) > 0 {
+			modules = append(modules, fields[0])
+		}
+	}
+	return modules
 }
 
 // prepareEnvironment sets up the execution environment
@@ -235,11 +369,12 @@ func (e *ScriptExecutor) prepareEnvironment() ([]string, error) {
 
 // killScript terminates a running script (best-effort; used on context cancellation)
 func (e *ScriptExecutor) killScript(scriptPath string) {
-	if val, ok := e.runningScripts.Load(scriptPath); ok {
-		if run, ok := val.(*scriptRun); ok && run.cmd != nil && run.cmd.Process != nil {
+	e.runningScripts.Range(func(key, val interface{}) bool {
+		if run, ok := val.(*scriptRun); ok && run.scriptPath == scriptPath && run.cmd != nil && run.cmd.Process != nil {
 			_ = run.cmd.Process.Kill()
 		}
-	}
+		return true
+	})
 }
 
 // updateMetrics updates execution metrics
@@ -293,15 +428,11 @@ func validateConfig(config *config.ScriptConfig) error {
 	if config.PythonPath == "" {
 		return fmt.Errorf("python path not set")
 	}
-	// Verify the interpreter exists and is named like a Python binary.
-	// PythonPath comes from operator-controlled configuration, not end-user input.
-	base := filepath.Base(config.PythonPath)
-	if !strings.HasPrefix(base, "python") {
-		return fmt.Errorf("python interpreter path %q does not look like a Python binary", config.PythonPath)
+	resolved, err := pythonutil.ResolveExecutable(config.PythonPath)
+	if err != nil {
+		return fmt.Errorf("python interpreter %q not found or not usable: %w", config.PythonPath, err)
 	}
-	if _, err := exec.LookPath(config.PythonPath); err != nil {
-		return fmt.Errorf("python interpreter %q not found: %w", config.PythonPath, err)
-	}
+	config.PythonPath = resolved
 	if config.MaxExecTime <= 0 {
 		return fmt.Errorf("invalid maximum execution time")
 	}
@@ -334,7 +465,7 @@ func (e *ScriptExecutor) ExecuteScriptWithInput(ctx context.Context, scriptPath 
 	inputFile.Close()
 
 	// Execute script with input file
-	return e.ExecuteScript(ctx, scriptPath, []string{"--input", inputFile.Name()})
+	return e.ExecuteScript(ctx, scriptPath, []string{inputFile.Name()})
 }
 
 // ExecuteScriptWithOutputCapture runs a script and captures structured output
@@ -389,21 +520,27 @@ func (e *ScriptExecutor) StartScriptAsync(ctx context.Context, scriptPath string
 
 // IsScriptRunning reports whether a script at the given path is currently executing.
 func (e *ScriptExecutor) IsScriptRunning(scriptPath string) bool {
-	_, exists := e.runningScripts.Load(scriptPath)
-	return exists
+	running := false
+	e.runningScripts.Range(func(key, value interface{}) bool {
+		if run, ok := value.(*scriptRun); ok && run.scriptPath == scriptPath {
+			running = true
+			return false
+		}
+		return true
+	})
+	return running
 }
 
 // StopScript stops a running script by ID using graceful→timeout→force-kill.
 // It waits for the background cmd.Wait() goroutine to finish so there is no
 // double-Wait() race condition.
 func (e *ScriptExecutor) StopScript(scriptID string) error {
-	value, exists := e.runningScripts.Load(scriptID)
+	run, exists := e.findScriptRun(scriptID)
 	if !exists {
 		return fmt.Errorf("script %s is not running", scriptID)
 	}
 
-	run, ok := value.(*scriptRun)
-	if !ok || run.cmd == nil || run.cmd.Process == nil {
+	if run.cmd == nil || run.cmd.Process == nil {
 		return nil
 	}
 
@@ -440,6 +577,25 @@ func (e *ScriptExecutor) StopScript(scriptID string) error {
 	}
 }
 
+func (e *ScriptExecutor) findScriptRun(scriptID string) (*scriptRun, bool) {
+	if value, exists := e.runningScripts.Load(scriptID); exists {
+		if run, ok := value.(*scriptRun); ok {
+			return run, true
+		}
+	}
+
+	var found *scriptRun
+	e.runningScripts.Range(func(key, value interface{}) bool {
+		if run, ok := value.(*scriptRun); ok && run.scriptPath == scriptID {
+			found = run
+			return false
+		}
+		return true
+	})
+
+	return found, found != nil
+}
+
 // Stop stops all running scripts and cleans up resources
 func (e *ScriptExecutor) Stop(ctx context.Context) error {
 	var errors []error
@@ -465,31 +621,39 @@ func (e *ScriptExecutor) Stop(ctx context.Context) error {
 
 // findPythonPath attempts to find the Python interpreter path in a cross-platform way
 func findPythonPath(logger *zap.Logger) string {
-	// First, check if PYTHON_PATH environment variable is set
-	pythonPath := os.Getenv("PYTHON_PATH")
-	if pythonPath != "" {
+	pythonPath, err := pythonutil.ResolveExecutable("")
+	if err == nil {
 		return pythonPath
 	}
 
-	// Define possible executable names for Python
-	pythonExecs := []string{"python3", "python"}
-
-	// On Windows, executable may have .exe extension
-	if runtime.GOOS == "windows" {
-		for i, execName := range pythonExecs {
-			pythonExecs[i] = execName + ".exe"
-		}
-	}
-
-	// Look for each possible Python executable in the PATH
-	for _, execName := range pythonExecs {
-		path, err := exec.LookPath(execName)
-		if err == nil {
-			return path
-		}
-	}
-
 	// If Python is not found, log a warning and return empty string
-	logger.Warn("Python interpreter not found. Some features may be unavailable.")
+	logger.Warn("Python interpreter not found. Some features may be unavailable.", zap.Error(err))
 	return ""
 }
+
+var standardLibraryImports = map[string]struct{}{
+	"argparse":    {},
+	"collections": {},
+	"csv":         {},
+	"datetime":    {},
+	"decimal":     {},
+	"json":        {},
+	"math":        {},
+	"random":      {},
+	"signal":      {},
+	"statistics":  {},
+	"sys":         {},
+	"time":        {},
+}
+
+var blockedImports = map[string]struct{}{
+	"ctypes":          {},
+	"multiprocessing": {},
+	"os":              {},
+	"pathlib":         {},
+	"shutil":          {},
+	"socket":          {},
+	"subprocess":      {},
+}
+
+var numpyAllocationPattern = regexp.MustCompile(`(?:np|numpy)\.(?:zeros|ones|empty)\s*\(\s*\(([^)]*)\)`)

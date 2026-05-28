@@ -58,6 +58,16 @@ wails build
 
 When the Wails app starts its embedded PostgreSQL instance, it now initializes the required schema automatically.
 
+## Production Beta Verification
+
+Run the local beta verification script before packaging or handing a build to controlled users:
+
+```powershell
+.\scripts\verify_beta.ps1
+```
+
+This runs the critical Go foundation suites, data/P2P workflow suites, the frontend production build, and Docker smoke prerequisites. Add `-RunDockerSmoke` to run the two-node P2P container exchange. See [docs/beta-runbook.md](docs/beta-runbook.md) for the support matrix, first-run checklist, and known beta limits.
+
 ## Docker P2P Smoke Test
 
 The repository includes a headless node for testing P2P market-data exchange between containers.

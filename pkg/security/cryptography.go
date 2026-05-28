@@ -12,7 +12,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -205,7 +205,9 @@ func GenerateSalt() ([]byte, error) {
 // Helper functions
 
 func newEncryptor(key []byte) (*Encryptor, error) {
-	block, err := aes.NewCipher(key)
+	normalizedKey := normalizeAESKey(key)
+
+	block, err := aes.NewCipher(normalizedKey)
 	if err != nil {
 		return nil, fmt.Errorf("creating cipher: %w", err)
 	}
@@ -216,9 +218,21 @@ func newEncryptor(key []byte) (*Encryptor, error) {
 	}
 
 	return &Encryptor{
-		key:    key,
+		key:    normalizedKey,
 		cipher: gcm,
 	}, nil
+}
+
+func normalizeAESKey(key []byte) []byte {
+	switch len(key) {
+	case 16, 24, 32:
+		normalized := make([]byte, len(key))
+		copy(normalized, key)
+		return normalized
+	default:
+		sum := sha256.Sum256(key)
+		return sum[:]
+	}
 }
 
 // Additional methods for key management

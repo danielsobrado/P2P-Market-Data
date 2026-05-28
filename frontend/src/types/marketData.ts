@@ -53,6 +53,15 @@ export interface InsiderTrade extends BaseMarketData {
   secForm: string
 }
 
+export interface SplitData extends BaseMarketData {
+  splitRatio: number
+  announcementDate: string
+  exDate: string
+  oldShares: number
+  newShares: number
+  status: string
+}
+
 export interface DataSource {
   peerId: string
   reputation: number

@@ -197,9 +197,19 @@ func (rm *ReputationManager) updateAllScores() {
 }
 
 func (rm *ReputationManager) updateMetrics() {
+	highRep, lowRep, averageScore := rm.calculateScoreStats()
+
 	rm.metrics.mu.Lock()
 	defer rm.metrics.mu.Unlock()
 
+	rm.metrics.HighRepPeers = highRep
+	rm.metrics.LowRepPeers = lowRep
+	rm.metrics.AverageScore = averageScore
+	rm.metrics.UpdatesProcessed++
+	rm.metrics.LastUpdate = time.Now()
+}
+
+func (rm *ReputationManager) calculateScoreStats() (int, int, float64) {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 
@@ -216,13 +226,12 @@ func (rm *ReputationManager) updateMetrics() {
 		}
 	}
 
-	rm.metrics.HighRepPeers = highRep
-	rm.metrics.LowRepPeers = lowRep
+	var averageScore float64
 	if len(rm.scores) > 0 {
-		rm.metrics.AverageScore = totalScore / float64(len(rm.scores))
+		averageScore = totalScore / float64(len(rm.scores))
 	}
-	rm.metrics.UpdatesProcessed++
-	rm.metrics.LastUpdate = time.Now()
+
+	return highRep, lowRep, averageScore
 }
 
 // ReputationAction represents types of actions that affect reputation
@@ -310,8 +319,17 @@ type ReputationUpdate struct {
 
 // GetReputationStats returns current reputation system statistics
 func (rm *ReputationManager) GetReputationStats() ReputationStats {
-	rm.metrics.mu.RLock()
-	defer rm.metrics.mu.RUnlock()
+	highRep, lowRep, averageScore := rm.calculateScoreStats()
+
+	rm.metrics.mu.Lock()
+	defer rm.metrics.mu.Unlock()
+
+	rm.metrics.HighRepPeers = highRep
+	rm.metrics.LowRepPeers = lowRep
+	rm.metrics.AverageScore = averageScore
+	if rm.metrics.LastUpdate.IsZero() {
+		rm.metrics.LastUpdate = time.Now()
+	}
 
 	return ReputationStats{
 		HighRepPeers:     rm.metrics.HighRepPeers,
@@ -450,10 +468,10 @@ func (rm *ReputationManager) AdjustReputationThresholds(ctx context.Context) {
 }
 
 func (rm *ReputationManager) adjustThresholds() {
+	stats := rm.GetReputationStats()
+
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-
-	stats := rm.GetReputationStats()
 
 	// Adjust minimum reputation based on network health
 	if stats.AverageScore > 0.7 && stats.HighRepPeers > stats.LowRepPeers*2 {

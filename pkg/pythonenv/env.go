@@ -7,10 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
+
+	"p2p_market_data/pkg/pythonutil"
 )
 
 // EnvConfig holds configuration for Python environment
@@ -100,6 +103,10 @@ func (m *Manager) CreateEnvironment(ctx context.Context, name string) (*Environm
 
 	start := time.Now()
 
+	if err := validateEnvName(name); err != nil {
+		return nil, err
+	}
+
 	// Check if environment already exists
 	if _, exists := m.envs[name]; exists {
 		return nil, fmt.Errorf("environment already exists: %s", name)
@@ -128,8 +135,8 @@ func (m *Manager) CreateEnvironment(ctx context.Context, name string) (*Environm
 	}
 
 	// Set paths
-	env.PythonPath = filepath.Join(envPath, getBinDir(), "python")
-	env.PipPath = filepath.Join(envPath, getBinDir(), "pip")
+	env.PythonPath = filepath.Join(envPath, getBinDir(), pythonExecutableName())
+	env.PipPath = filepath.Join(envPath, getBinDir(), pipExecutableName())
 
 	// Install base requirements
 	if err := m.installBaseRequirements(ctx, env); err != nil {
@@ -279,14 +286,18 @@ func (m *Manager) InstallPackage(ctx context.Context, name string, pkg string) e
 // Private methods
 
 func (m *Manager) createVirtualEnv(ctx context.Context, env *Environment) error {
-	args := []string{"-m", "venv", env.Path}
-	if m.config.PythonVersion != "" {
-		args = append([]string{"-m", "venv", "--python=" + m.config.PythonVersion}, args...)
+	pythonPath, err := pythonutil.ResolveExecutable(m.config.PythonVersion)
+	if err != nil {
+		return fmt.Errorf("resolving Python executable: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "python3", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("creating virtual environment: %w", err)
+	cmd := exec.CommandContext(ctx, pythonPath, "-m", "venv", "--system-site-packages", env.Path)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("creating virtual environment: %w", ctx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("creating virtual environment with %s: %w\nOutput: %s", pythonPath, err, strings.TrimSpace(string(output)))
 	}
 
 	return nil
@@ -319,10 +330,14 @@ func (m *Manager) installBaseRequirements(ctx context.Context, env *Environment)
 }
 
 func (m *Manager) runPip(ctx context.Context, env *Environment, args ...string) error {
-	cmd := exec.CommandContext(ctx, env.PipPath, args...)
+	pipArgs := append([]string{"-m", "pip"}, args...)
+	cmd := exec.CommandContext(ctx, env.PythonPath, pipArgs...)
 	cmd.Env = m.buildEnvVars()
 
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil {
 		return fmt.Errorf("pip command failed: %w\nOutput: %s", err, string(output))
 	}
@@ -350,11 +365,35 @@ func validateConfig(config *EnvConfig) error {
 	return nil
 }
 
+func validateEnvName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("environment name cannot be empty")
+	}
+	if filepath.Base(name) != name || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("environment name must not contain path separators: %s", name)
+	}
+	return nil
+}
+
 func getBinDir() string {
 	if runtime.GOOS == "windows" {
 		return "Scripts"
 	}
 	return "bin"
+}
+
+func pythonExecutableName() string {
+	if runtime.GOOS == "windows" {
+		return "python.exe"
+	}
+	return "python"
+}
+
+func pipExecutableName() string {
+	if runtime.GOOS == "windows" {
+		return "pip.exe"
+	}
+	return "pip"
 }
 
 func updateAverage(current time.Duration, new time.Duration, count int64) time.Duration {

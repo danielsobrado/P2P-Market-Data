@@ -50,6 +50,15 @@ type publishRequest struct {
 	DataType string  `json:"data_type"`
 }
 
+type requestDataRequest struct {
+	PeerID      string `json:"peer_id"`
+	Type        string `json:"type"`
+	Symbol      string `json:"symbol"`
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	Granularity string `json:"granularity"`
+}
+
 func main() {
 	logger, err := zap.NewProduction()
 	if env("LOG_LEVEL", "info") == "debug" {
@@ -87,6 +96,7 @@ func main() {
 	mux.HandleFunc("POST /connect", srv.connect)
 	mux.HandleFunc("POST /market-data", srv.publishMarketData)
 	mux.HandleFunc("GET /market-data", srv.listMarketData)
+	mux.HandleFunc("POST /request-data", srv.requestData)
 
 	httpServer := &http.Server{
 		Addr:              env("NODE_HTTP_ADDR", ":8080"),
@@ -217,6 +227,60 @@ func (s *server) publishMarketData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, item)
+}
+
+func (s *server) requestData(w http.ResponseWriter, r *http.Request) {
+	var req requestDataRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.PeerID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("peer_id is required"))
+		return
+	}
+	if req.Type == "" {
+		req.Type = data.DataTypeEOD
+	}
+	if req.Symbol == "" {
+		writeError(w, http.StatusBadRequest, errors.New("symbol is required"))
+		return
+	}
+	if req.StartDate == "" {
+		req.StartDate = time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+	}
+	if req.EndDate == "" {
+		req.EndDate = time.Now().UTC().AddDate(0, 0, 1).Format("2006-01-02")
+	}
+	if req.Granularity == "" {
+		req.Granularity = "DAILY"
+	}
+
+	request := data.DataRequest{
+		Type:        req.Type,
+		Symbol:      req.Symbol,
+		StartDate:   req.StartDate,
+		EndDate:     req.EndDate,
+		Granularity: req.Granularity,
+	}
+	if err := s.host.RequestData(r.Context(), req.PeerID, request); err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+
+	items, err := s.repo.ListMarketData(r.Context(), data.MarketDataFilter{
+		Symbol:   req.Symbol,
+		DataType: req.Type,
+		Limit:    100,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"requested": request,
+		"records":   len(items),
+	})
 }
 
 func (s *server) listMarketData(w http.ResponseWriter, r *http.Request) {

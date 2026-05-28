@@ -15,6 +15,8 @@ export function GetDividendData(arg1:string,arg2:string,arg3:string):Promise<Arr
 
 export function GetEODData(arg1:string,arg2:string,arg3:string):Promise<Array<data.EODData>>;
 
+export function GetHealthDiagnostics():Promise<main.AppHealthDiagnostics>;
+
 export function GetInsiderData(arg1:string,arg2:string,arg3:string):Promise<Array<data.InsiderTrade>>;
 
 export function GetPeers():Promise<Array<data.Peer>>;
@@ -24,6 +26,8 @@ export function GetScriptContent(arg1:string):Promise<string>;
 export function GetScripts():Promise<Array<main.ScriptInfo>>;
 
 export function GetServerStatus():Promise<main.ServerStatus>;
+
+export function GetSplitData(arg1:string,arg2:string,arg3:string):Promise<Array<data.SplitData>>;
 
 export function InstallScript(arg1:string):Promise<void>;
 

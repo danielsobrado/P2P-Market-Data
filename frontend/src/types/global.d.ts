@@ -5,6 +5,7 @@ import type {
   DividendData,
   EODData,
   InsiderTrade,
+  SplitData,
   BaseMarketData,
 } from "./marketData"
 
@@ -67,6 +68,7 @@ declare global {
           GetEODData: (symbol: string, startDate: string, endDate: string) => Promise<EODData[]>;
           GetDividendData: (symbol: string, startDate: string, endDate: string) => Promise<DividendData[]>;
           GetInsiderData: (symbol: string, startDate: string, endDate: string) => Promise<InsiderTrade[]>;
+          GetSplitData: (symbol: string, startDate: string, endDate: string) => Promise<SplitData[]>;
           
           // Script management
           GetScripts: () => Promise<ScriptInfo[]>;

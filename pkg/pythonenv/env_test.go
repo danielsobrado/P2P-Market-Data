@@ -265,11 +265,11 @@ func TestErrorHandling(t *testing.T) {
 			Timeout:       time.Minute,
 		}
 
-		_, err := NewManager(invalidConfig, zaptest.NewLogger(t))
+		invalidManager, err := NewManager(invalidConfig, zaptest.NewLogger(t))
 		assert.NoError(t, err) // Manager creation should succeed
 
 		// Try to create environment with invalid Python version
-		_, err = manager.CreateEnvironment(context.Background(), "invalid-python-test")
+		_, err = invalidManager.CreateEnvironment(context.Background(), "invalid-python-test")
 		assert.Error(t, err)
 	})
 
